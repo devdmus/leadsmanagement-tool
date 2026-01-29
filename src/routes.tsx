@@ -1,6 +1,6 @@
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
-import LeadsPage from './pages/LeadsPage';
+import LeadsPageEnhanced from './pages/LeadsPageEnhanced';
 import LeadDetailPage from './pages/LeadDetailPage';
 import SeoPage from './pages/SeoPage';
 import UsersPage from './pages/UsersPage';
@@ -25,7 +25,7 @@ const routes: RouteConfig[] = [
   {
     name: 'Leads',
     path: '/leads',
-    element: <LeadsPage />
+    element: <LeadsPageEnhanced />
   },
   {
     name: 'Lead Detail',

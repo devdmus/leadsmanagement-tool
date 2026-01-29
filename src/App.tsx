@@ -8,6 +8,7 @@ import { AuthProvider } from '@/contexts/AuthContext';
 import { RouteGuard } from '@/components/common/RouteGuard';
 import { AppLayout } from '@/components/layouts/AppLayout';
 import { Toaster } from '@/components/ui/toaster';
+import { ChatWidget } from '@/components/common/ChatWidget';
 
 function AppContent() {
   const location = useLocation();
@@ -28,18 +29,21 @@ function AppContent() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       ) : (
-        <AppLayout>
-          <Routes>
-            {routes.map((route, index) => (
-              <Route
-                key={index}
-                path={route.path}
-                element={route.element}
-              />
-            ))}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </AppLayout>
+        <>
+          <AppLayout>
+            <Routes>
+              {routes.map((route, index) => (
+                <Route
+                  key={index}
+                  path={route.path}
+                  element={route.element}
+                />
+              ))}
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </AppLayout>
+          <ChatWidget />
+        </>
       )}
       <Toaster />
     </>

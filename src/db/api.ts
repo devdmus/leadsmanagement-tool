@@ -516,3 +516,153 @@ export const subscriptionPlansApi = {
     }
   },
 };
+
+// Follow-ups API
+export const followUpsApi = {
+  getAll: async () => {
+    const { data, error } = await supabase
+      .from('follow_ups')
+      .select('*, lead:leads(*), user:profiles(*)')
+      .order('follow_up_date', { ascending: true });
+    
+    if (error) throw error;
+    return Array.isArray(data) ? data : [];
+  },
+
+  getByLead: async (leadId: string) => {
+    const { data, error } = await supabase
+      .from('follow_ups')
+      .select('*, user:profiles(*)')
+      .eq('lead_id', leadId)
+      .order('follow_up_date', { ascending: true });
+    
+    if (error) throw error;
+    return Array.isArray(data) ? data : [];
+  },
+
+  create: async (followUp: {
+    lead_id: string;
+    user_id: string;
+    follow_up_date: string;
+    notes?: string;
+  }) => {
+    const { data, error } = await supabase
+      .from('follow_ups')
+      .insert(followUp)
+      .select()
+      .maybeSingle();
+    
+    if (error) throw error;
+    return data;
+  },
+
+  update: async (id: string, updates: { status?: string; notes?: string; follow_up_date?: string }) => {
+    const { data, error } = await supabase
+      .from('follow_ups')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .maybeSingle();
+    
+    if (error) throw error;
+    return data;
+  },
+
+  delete: async (id: string) => {
+    const { error } = await supabase
+      .from('follow_ups')
+      .delete()
+      .eq('id', id);
+    
+    if (error) throw error;
+  },
+};
+
+// Chat API
+export const chatApi = {
+  getRooms: async () => {
+    const { data, error } = await supabase
+      .from('chat_rooms')
+      .select('*, participants:chat_participants(*, user:profiles(*))');
+    
+    if (error) throw error;
+    return Array.isArray(data) ? data : [];
+  },
+
+  createRoom: async (participantIds: string[], name?: string) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Not authenticated');
+
+    const { data: room, error: roomError } = await supabase
+      .from('chat_rooms')
+      .insert({
+        name,
+        is_group: participantIds.length > 1,
+        created_by: user.id,
+      })
+      .select()
+      .maybeSingle();
+
+    if (roomError) throw roomError;
+    if (!room) throw new Error('Failed to create room');
+
+    // Add participants
+    const participants = [user.id, ...participantIds].map(userId => ({
+      room_id: room.id,
+      user_id: userId,
+    }));
+
+    const { error: participantsError } = await supabase
+      .from('chat_participants')
+      .insert(participants);
+
+    if (participantsError) throw participantsError;
+
+    return room;
+  },
+
+  getMessages: async (roomId: string) => {
+    const { data, error } = await supabase
+      .from('chat_messages')
+      .select('*, user:profiles(*)')
+      .eq('room_id', roomId)
+      .order('created_at', { ascending: true });
+    
+    if (error) throw error;
+    return Array.isArray(data) ? data : [];
+  },
+
+  sendMessage: async (roomId: string, content: string) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Not authenticated');
+
+    const { data, error } = await supabase
+      .from('chat_messages')
+      .insert({
+        room_id: roomId,
+        user_id: user.id,
+        content,
+      })
+      .select()
+      .maybeSingle();
+    
+    if (error) throw error;
+    return data;
+  },
+
+  subscribeToMessages: (roomId: string, callback: (message: unknown) => void) => {
+    return supabase
+      .channel(`room:${roomId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'chat_messages',
+          filter: `room_id=eq.${roomId}`,
+        },
+        callback
+      )
+      .subscribe();
+  },
+};
