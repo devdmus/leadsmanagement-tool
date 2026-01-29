@@ -6,7 +6,7 @@
 Marketing Tracking Dashboard
 
 ### 1.2 Application Description
-A comprehensive dashboard system for tracking marketing leads from multiple sources (website forms, Facebook, LinkedIn, SEO), managing SEO meta tags, and enabling sales team follow-up with lead status tracking. The system includes role-based access control with Admin, Sales, SEO, and Client user roles, along with internal messaging and note-taking capabilities for lead management.
+A comprehensive dashboard system for tracking marketing leads from multiple sources (website forms, Facebook, LinkedIn, SEO), managing SEO meta tags, and enabling sales team follow-up with lead status tracking. The system includes role-based access control with Admin, Sales, SEO, and Client user roles, along with internal messaging and note-taking capabilities for lead management. The application features an attractive, responsive UI/UX design and includes subscription plan options for client users.
 
 ## 2. Core Features
 
@@ -36,7 +36,7 @@ A comprehensive dashboard system for tracking marketing leads from multiple sour
 - **Admin Role**: Full access to all dashboard features and activities, including user management and permission configuration
 - **Sales Role**: Access to assigned leads with configurable read/write permissions set by Admin
 - **SEO Role**: Access to SEO meta tag management and assigned leads with configurable read/write permissions set by Admin
-- **Client Role**: Paid access with configurable read/write permissions set by Admin
+- **Client Role**: Paid access with configurable read/write permissions set by Admin, subscription-based access with monthly, quarterly, and annually plans
 
 ### 2.5 Permission Control System
 - Admin can configure read and write access for Sales, SEO, and Client roles
@@ -49,10 +49,29 @@ A comprehensive dashboard system for tracking marketing leads from multiple sour
 - Conversation history tracking with timestamps
 - Ability to view all notes and messages related to a specific lead
 
+### 2.7 Client Subscription Management
+- Display subscription plan options for client users: Monthly, Quarterly, and Annually
+- Show pricing and features for each subscription tier
+- Subscription plan selection interface for client users
+
+### 2.8 UI/UX Design Requirements
+- Attractive and modern user interface design
+- Fully responsive layout supporting desktop, tablet, and mobile devices
+- Intuitive navigation and user-friendly interactions
+- Consistent design language across all pages and components
+
+### 2.9 Dummy Data
+- Pre-populated with sample data for all user roles (Admin, Sales, SEO, Client)
+- Sample leads from various sources with different statuses
+- Example SEO meta tags
+- Sample notes and messages
+- Demo activity logs
+
 ## 3. Technical Requirements
 
 ### 3.1 Frontend
 - Built with React
+- Responsive design supporting multiple screen sizes
 
 ### 3.2 Backend
 - MySQL database for data storage
@@ -83,7 +102,8 @@ A comprehensive dashboard system for tracking marketing leads from multiple sour
 - Username
 - Role (Admin, Sales, SEO, Client)
 - Access permissions (read/write settings)
-- Client payment status (for Client role)
+- Client subscription plan (Monthly, Quarterly, Annually)
+- Subscription status and expiration date
 
 ### 4.4 Activity Log
 - Activity ID
@@ -99,3 +119,10 @@ A comprehensive dashboard system for tracking marketing leads from multiple sour
 - Content
 - Timestamp
 - Message type (note or conversation message)
+
+### 4.6 Subscription Plans
+- Plan ID
+- Plan name (Monthly, Quarterly, Annually)
+- Pricing
+- Features included
+- Duration

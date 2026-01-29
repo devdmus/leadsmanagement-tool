@@ -28,6 +28,7 @@ const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard, roles: ['admin', 'sales', 'seo', 'client'] },
   { name: 'Leads', href: '/leads', icon: Users, roles: ['admin', 'sales', 'seo', 'client'] },
   { name: 'SEO Meta Tags', href: '/seo', icon: Search, roles: ['admin', 'seo'] },
+  { name: 'Subscription', href: '/subscription', icon: FileText, roles: ['client'] },
   { name: 'User Management', href: '/users', icon: Settings, roles: ['admin'] },
   { name: 'Permissions', href: '/permissions', icon: Shield, roles: ['admin'] },
   { name: 'Activity Logs', href: '/activity', icon: FileText, roles: ['admin', 'sales', 'seo'] },

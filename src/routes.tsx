@@ -6,6 +6,7 @@ import SeoPage from './pages/SeoPage';
 import UsersPage from './pages/UsersPage';
 import PermissionsPage from './pages/PermissionsPage';
 import ActivityPage from './pages/ActivityPage';
+import SubscriptionPage from './pages/SubscriptionPage';
 import type { ReactNode } from 'react';
 
 interface RouteConfig {
@@ -50,6 +51,11 @@ const routes: RouteConfig[] = [
     name: 'Activity Logs',
     path: '/activity',
     element: <ActivityPage />
+  },
+  {
+    name: 'Subscription',
+    path: '/subscription',
+    element: <SubscriptionPage />
   },
   {
     name: 'Login',
