@@ -4,6 +4,7 @@ import LeadsPageEnhanced from './pages/LeadsPageEnhanced';
 import LeadDetailPage from './pages/LeadDetailPage';
 import SeoPage from './pages/SeoPage';
 import UsersPage from './pages/UsersPage';
+import UserProfilePage from './pages/UserProfilePage';
 import PermissionsPage from './pages/PermissionsPage';
 import ActivityPage from './pages/ActivityPage';
 import SubscriptionPage from './pages/SubscriptionPage';
@@ -41,6 +42,11 @@ const routes: RouteConfig[] = [
     name: 'User Management',
     path: '/users',
     element: <UsersPage />
+  },
+  {
+    name: 'User Profile',
+    path: '/users/:id',
+    element: <UserProfilePage />
   },
   {
     name: 'Permissions',

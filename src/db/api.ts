@@ -4,10 +4,11 @@ type UserRole = 'admin' | 'sales' | 'seo' | 'client';
 type LeadSource = 'facebook' | 'linkedin' | 'form' | 'seo';
 type LeadStatus = 'pending' | 'completed' | 'remainder';
 
-type Profile = {
+export type Profile = {
   id: string;
   username: string;
   email: string | null;
+  phone: string | null;
   role: UserRole;
   is_client_paid: boolean;
   created_at: string;
@@ -36,19 +37,13 @@ type SeoMetaTag = {
   updated_at: string;
 };
 
-type Note = {
+export type Note = {
   id: string;
   lead_id: string;
   user_id: string;
   content: string;
-  created_at: string;
-};
-
-type Message = {
-  id: string;
-  lead_id: string;
-  user_id: string;
-  content: string;
+  note_type?: string | null;
+  reason?: string | null;
   created_at: string;
 };
 
@@ -77,10 +72,6 @@ type LeadWithAssignee = Lead & {
 };
 
 type NoteWithUser = Note & {
-  user?: Profile;
-};
-
-type MessageWithUser = Message & {
   user?: Profile;
 };
 
@@ -117,6 +108,15 @@ export const profilesApi = {
     
     if (error) throw error;
     return data;
+  },
+
+  delete: async (id: string): Promise<void> => {
+    const { error } = await supabase
+      .from('profiles')
+      .delete()
+      .eq('id', id);
+    
+    if (error) throw error;
   },
 };
 
@@ -341,10 +341,10 @@ export const notesApi = {
     return data;
   },
 
-  update: async (id: string, content: string): Promise<Note | null> => {
+  update: async (id: string, updates: Partial<Omit<Note, 'id' | 'created_at' | 'lead_id' | 'user_id'>>): Promise<Note | null> => {
     const { data, error } = await supabase
       .from('notes')
-      .update({ content })
+      .update(updates)
       .eq('id', id)
       .select()
       .maybeSingle();
@@ -356,55 +356,6 @@ export const notesApi = {
   delete: async (id: string): Promise<void> => {
     const { error } = await supabase
       .from('notes')
-      .delete()
-      .eq('id', id);
-    
-    if (error) throw error;
-  },
-};
-
-// Messages API
-export const messagesApi = {
-  getByLeadId: async (leadId: string): Promise<MessageWithUser[]> => {
-    const { data, error } = await supabase
-      .from('messages')
-      .select(`
-        *,
-        user:profiles!messages_user_id_fkey(*)
-      `)
-      .eq('lead_id', leadId)
-      .order('created_at', { ascending: true });
-    
-    if (error) throw error;
-    return Array.isArray(data) ? data : [];
-  },
-
-  create: async (message: Omit<Message, 'id' | 'created_at'>): Promise<Message | null> => {
-    const { data, error } = await supabase
-      .from('messages')
-      .insert(message)
-      .select()
-      .maybeSingle();
-    
-    if (error) throw error;
-    return data;
-  },
-
-  update: async (id: string, content: string): Promise<Message | null> => {
-    const { data, error } = await supabase
-      .from('messages')
-      .update({ content })
-      .eq('id', id)
-      .select()
-      .maybeSingle();
-    
-    if (error) throw error;
-    return data;
-  },
-
-  delete: async (id: string): Promise<void> => {
-    const { error } = await supabase
-      .from('messages')
       .delete()
       .eq('id', id);
     
@@ -415,7 +366,7 @@ export const messagesApi = {
 // Activity Logs API
 export const activityLogsApi = {
   getAll: async (limit = 100): Promise<ActivityLog[]> => {
-    const { data, error } = await supabase
+    const { data, error} = await supabase
       .from('activity_logs')
       .select('*')
       .order('created_at', { ascending: false })

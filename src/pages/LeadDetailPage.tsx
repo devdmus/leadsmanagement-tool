@@ -1,7 +1,44 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { leadsApi, profilesApi, notesApi, messagesApi, activityLogsApi } from '@/db/api';
+import { leadsApi, profilesApi, notesApi, activityLogsApi, followUpsApi } from '@/db/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Separator } from '@/components/ui/separator';
+import { ArrowLeft, Mail, Phone, Calendar, User, Trash2, Edit, Plus, Clock } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+
 type UserRole = 'admin' | 'sales' | 'seo' | 'client';
 type LeadSource = 'facebook' | 'linkedin' | 'form' | 'seo';
 type LeadStatus = 'pending' | 'completed' | 'remainder';
@@ -9,11 +46,7 @@ type LeadStatus = 'pending' | 'completed' | 'remainder';
 type Profile = {
   id: string;
   username: string;
-  email: string | null;
   role: UserRole;
-  is_client_paid: boolean;
-  created_at: string;
-  updated_at: string;
 };
 
 type Lead = {
@@ -33,15 +66,20 @@ type Note = {
   lead_id: string;
   user_id: string;
   content: string;
+  note_type?: string;
+  reason?: string;
   created_at: string;
 };
 
-type Message = {
+type FollowUp = {
   id: string;
   lead_id: string;
   user_id: string;
-  content: string;
+  follow_up_date: string;
+  status: string;
+  notes: string | null;
   created_at: string;
+  user?: Profile;
 };
 
 type LeadWithAssignee = Lead & {
@@ -52,38 +90,6 @@ type NoteWithUser = Note & {
   user?: Profile;
 };
 
-type MessageWithUser = Message & {
-  user?: Profile;
-};
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Separator } from '@/components/ui/separator';
-import { ArrowLeft, Mail, Phone, Calendar, User, Trash2 } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
-import { Skeleton } from '@/components/ui/skeleton';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/components/ui/alert-dialog';
-
 export default function LeadDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -93,11 +99,17 @@ export default function LeadDetailPage() {
   const [lead, setLead] = useState<LeadWithAssignee | null>(null);
   const [users, setUsers] = useState<Profile[]>([]);
   const [notes, setNotes] = useState<NoteWithUser[]>([]);
-  const [messages, setMessages] = useState<MessageWithUser[]>([]);
+  const [followUps, setFollowUps] = useState<FollowUp[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [newNote, setNewNote] = useState('');
-  const [newMessage, setNewMessage] = useState('');
+  const [noteReason, setNoteReason] = useState('');
+  const [noteType, setNoteType] = useState('general');
+  const [editingNote, setEditingNote] = useState<Note | null>(null);
+  const [showNoteDialog, setShowNoteDialog] = useState(false);
+  const [showFollowUpDialog, setShowFollowUpDialog] = useState(false);
+  const [followUpDate, setFollowUpDate] = useState('');
+  const [followUpNotes, setFollowUpNotes] = useState('');
 
   useEffect(() => {
     if (id) {
@@ -109,17 +121,17 @@ export default function LeadDetailPage() {
     if (!id) return;
 
     try {
-      const [leadData, usersData, notesData, messagesData] = await Promise.all([
+      const [leadData, usersData, notesData, followUpsData] = await Promise.all([
         leadsApi.getById(id),
         profilesApi.getAll(),
         notesApi.getByLeadId(id),
-        messagesApi.getByLeadId(id),
+        followUpsApi.getByLead(id),
       ]);
 
-      setLead(leadData);
-      setUsers(usersData);
-      setNotes(notesData);
-      setMessages(messagesData);
+      setLead(leadData as LeadWithAssignee);
+      setUsers(usersData as Profile[]);
+      setNotes(notesData as NoteWithUser[]);
+      setFollowUps(followUpsData as FollowUp[]);
     } catch (error) {
       console.error('Failed to load lead details:', error);
       toast({
@@ -158,7 +170,7 @@ export default function LeadDetailPage() {
 
       toast({
         title: 'Success',
-        description: 'Lead updated successfully',
+        description: `Lead ${field} updated successfully`,
       });
 
       loadData();
@@ -172,96 +184,136 @@ export default function LeadDetailPage() {
     }
   };
 
-  const handleAddNote = async () => {
+  const handleSaveNote = async () => {
     if (!id || !profile || !newNote.trim()) return;
 
-    if (!hasPermission('notes', 'write')) {
-      toast({
-        title: 'Permission Denied',
-        description: 'You do not have permission to add notes',
-        variant: 'destructive',
-      });
-      return;
-    }
-
     try {
-      await notesApi.create({
-        lead_id: id,
-        user_id: profile.id as string,
-        content: newNote,
-      });
+      if (editingNote) {
+        // Update existing note
+        await notesApi.update(editingNote.id, {
+          content: newNote,
+          reason: noteReason || null,
+          note_type: noteType,
+        });
 
-      await activityLogsApi.create({
-        user_id: profile.id as string,
-        action: 'add_note',
-        resource_type: 'lead',
-        resource_id: id,
-        details: null,
-      });
+        toast({
+          title: 'Success',
+          description: 'Note updated successfully',
+        });
+      } else {
+        // Create new note
+        await notesApi.create({
+          lead_id: id,
+          user_id: profile.id as string,
+          content: newNote,
+          reason: noteReason || null,
+          note_type: noteType,
+        });
 
-      toast({
-        title: 'Success',
-        description: 'Note added successfully',
-      });
+        toast({
+          title: 'Success',
+          description: 'Note added successfully',
+        });
+      }
+
+      if (profile) {
+        await activityLogsApi.create({
+          user_id: profile.id as string,
+          action: editingNote ? 'update_note' : 'create_note',
+          resource_type: 'note',
+          resource_id: id,
+          details: { content: newNote },
+        });
+      }
 
       setNewNote('');
+      setNoteReason('');
+      setNoteType('general');
+      setEditingNote(null);
+      setShowNoteDialog(false);
       loadData();
     } catch (error) {
-      console.error('Failed to add note:', error);
+      console.error('Failed to save note:', error);
       toast({
         title: 'Error',
-        description: 'Failed to add note',
+        description: 'Failed to save note',
         variant: 'destructive',
       });
     }
   };
 
-  const handleAddMessage = async () => {
-    if (!id || !profile || !newMessage.trim()) return;
-
-    if (!hasPermission('messages', 'write')) {
-      toast({
-        title: 'Permission Denied',
-        description: 'You do not have permission to send messages',
-        variant: 'destructive',
-      });
-      return;
-    }
-
+  const handleDeleteNote = async (noteId: string) => {
     try {
-      await messagesApi.create({
-        lead_id: id,
-        user_id: profile.id as string,
-        content: newMessage,
-      });
+      await notesApi.delete(noteId);
 
-      await activityLogsApi.create({
-        user_id: profile.id as string,
-        action: 'send_message',
-        resource_type: 'lead',
-        resource_id: id,
-        details: null,
-      });
+      if (profile) {
+        await activityLogsApi.create({
+          user_id: profile.id as string,
+          action: 'delete_note',
+          resource_type: 'note',
+          resource_id: id || '',
+          details: { note_id: noteId },
+        });
+      }
 
       toast({
         title: 'Success',
-        description: 'Message sent successfully',
+        description: 'Note deleted successfully',
       });
 
-      setNewMessage('');
       loadData();
     } catch (error) {
-      console.error('Failed to send message:', error);
+      console.error('Failed to delete note:', error);
       toast({
         title: 'Error',
-        description: 'Failed to send message',
+        description: 'Failed to delete note',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleCreateFollowUp = async () => {
+    if (!id || !profile || !followUpDate) return;
+
+    try {
+      await followUpsApi.create({
+        lead_id: id,
+        user_id: profile.id as string,
+        follow_up_date: followUpDate,
+        notes: followUpNotes || undefined,
+      });
+
+      if (profile) {
+        await activityLogsApi.create({
+          user_id: profile.id as string,
+          action: 'create_follow_up',
+          resource_type: 'follow_up',
+          resource_id: id,
+          details: { follow_up_date: followUpDate },
+        });
+      }
+
+      toast({
+        title: 'Success',
+        description: 'Follow-up scheduled successfully',
+      });
+
+      setFollowUpDate('');
+      setFollowUpNotes('');
+      setShowFollowUpDialog(false);
+      loadData();
+    } catch (error) {
+      console.error('Failed to create follow-up:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to schedule follow-up',
         variant: 'destructive',
       });
     }
   };
 
   const handleDeleteLead = async () => {
-    if (!id || !hasPermission('leads', 'write')) return;
+    if (!id) return;
 
     try {
       await leadsApi.delete(id);
@@ -292,46 +344,56 @@ export default function LeadDetailPage() {
     }
   };
 
+  const openEditNoteDialog = (note: Note) => {
+    setEditingNote(note);
+    setNewNote(note.content);
+    setNoteReason(note.reason || '');
+    setNoteType(note.note_type || 'general');
+    setShowNoteDialog(true);
+  };
+
+  const openNewNoteDialog = () => {
+    setEditingNote(null);
+    setNewNote('');
+    setNoteReason('');
+    setNoteType('general');
+    setShowNoteDialog(true);
+  };
+
   if (loading) {
     return (
       <div className="space-y-6">
-        <Skeleton className="h-10 w-48 bg-muted" />
-        <div className="grid gap-6 md:grid-cols-2">
-          <Skeleton className="h-64 bg-muted" />
-          <Skeleton className="h-64 bg-muted" />
-        </div>
+        <Skeleton className="h-12 w-full" />
+        <Skeleton className="h-64 w-full" />
+        <Skeleton className="h-64 w-full" />
       </div>
     );
   }
 
   if (!lead) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[400px]">
-        <p className="text-muted-foreground">Lead not found</p>
-        <Button onClick={() => navigate('/leads')} className="mt-4">
-          Back to Leads
-        </Button>
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold mb-2">Lead Not Found</h2>
+          <p className="text-muted-foreground mb-4">The lead you're looking for doesn't exist.</p>
+          <Button onClick={() => navigate('/leads')}>Back to Leads</Button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => navigate('/leads')}>
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <div>
-            <h1 className="text-3xl font-bold">{lead.name}</h1>
-            <p className="text-muted-foreground">Lead Details</p>
-          </div>
-        </div>
+        <Button variant="ghost" onClick={() => navigate('/leads')}>
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Back to Leads
+        </Button>
         {hasPermission('leads', 'write') && (
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button variant="destructive">
-                <Trash2 className="mr-2 h-4 w-4" />
+                <Trash2 className="h-4 w-4 mr-2" />
                 Delete Lead
               </Button>
             </AlertDialogTrigger>
@@ -339,7 +401,7 @@ export default function LeadDetailPage() {
               <AlertDialogHeader>
                 <AlertDialogTitle>Are you sure?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  This action cannot be undone. This will permanently delete the lead and all associated notes and messages.
+                  This will permanently delete this lead and all associated data.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -351,43 +413,34 @@ export default function LeadDetailPage() {
         )}
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Lead Information</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center gap-2">
-              <Mail className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm">{lead.email}</span>
-            </div>
-            {lead.phone && (
-              <div className="flex items-center gap-2">
-                <Phone className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm">{lead.phone}</span>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-2xl">{lead.name}</CardTitle>
+          <CardDescription>Lead Details</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-2">
+              <Label>Email</Label>
+              <div className="flex items-center gap-2 text-sm">
+                <Mail className="h-4 w-4 text-muted-foreground" />
+                <span>{lead.email}</span>
               </div>
-            )}
-            <div className="flex items-center gap-2">
-              <Calendar className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm">Created: {new Date(lead.created_at).toLocaleString()}</span>
             </div>
-            <div className="flex items-center gap-2">
-              <Calendar className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm">Updated: {new Date(lead.updated_at).toLocaleString()}</span>
+
+            <div className="space-y-2">
+              <Label>Phone</Label>
+              <div className="flex items-center gap-2 text-sm">
+                <Phone className="h-4 w-4 text-muted-foreground" />
+                <span>{lead.phone || 'N/A'}</span>
+              </div>
             </div>
-            <Separator />
+
             <div className="space-y-2">
               <Label>Source</Label>
-              <Badge variant="outline">{lead.source.toUpperCase()}</Badge>
+              <Badge>{lead.source}</Badge>
             </div>
-          </CardContent>
-        </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Lead Management</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="status">Status</Label>
               <Select
@@ -427,54 +480,92 @@ export default function LeadDetailPage() {
               </Select>
             </div>
 
-            {lead.assignee && (
-              <div className="flex items-center gap-2 p-3 bg-muted rounded-md">
-                <User className="h-4 w-4 text-muted-foreground" />
-                <div>
-                  <p className="text-sm font-medium">{lead.assignee.username}</p>
-                  <p className="text-xs text-muted-foreground">{lead.assignee.role}</p>
-                </div>
+            <div className="space-y-2">
+              <Label>Created</Label>
+              <div className="flex items-center gap-2 text-sm">
+                <Calendar className="h-4 w-4 text-muted-foreground" />
+                <span>{new Date(lead.created_at).toLocaleString()}</span>
               </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
-            <CardTitle>Notes</CardTitle>
-            <CardDescription>Internal notes for this lead</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {hasPermission('notes', 'write') && (
-              <div className="space-y-2">
-                <Textarea
-                  placeholder="Add a note..."
-                  value={newNote}
-                  onChange={(e) => setNewNote(e.target.value)}
-                />
-                <Button onClick={handleAddNote} disabled={!newNote.trim()}>
+            <div className="flex items-center justify-between">
+              <CardTitle>Notes</CardTitle>
+              {hasPermission('notes', 'write') && (
+                <Button size="sm" onClick={openNewNoteDialog}>
+                  <Plus className="h-4 w-4 mr-2" />
                   Add Note
                 </Button>
-              </div>
-            )}
-
-            <Separator />
-
-            <div className="space-y-3 max-h-[400px] overflow-y-auto">
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
               {notes.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-4">No notes yet</p>
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  No notes yet
+                </p>
               ) : (
                 notes.map((note) => (
-                  <div key={note.id} className="p-3 bg-muted rounded-md space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">{note.user?.username}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {new Date(note.created_at).toLocaleString()}
-                      </span>
+                  <div key={note.id} className="border rounded-lg p-4 space-y-2">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <p className="text-sm">{note.content}</p>
+                        {note.reason && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Reason: {note.reason}
+                          </p>
+                        )}
+                        {note.note_type && note.note_type !== 'general' && (
+                          <Badge variant="outline" className="mt-2 text-xs">
+                            {note.note_type.replace('_', ' ')}
+                          </Badge>
+                        )}
+                      </div>
+                      {hasPermission('notes', 'write') && (
+                        <div className="flex gap-2">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => openEditNoteDialog(note)}
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="ghost" size="icon">
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Delete Note?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  This action cannot be undone.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => handleDeleteNote(note.id)}>
+                                  Delete
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
+                      )}
                     </div>
-                    <p className="text-sm">{note.content}</p>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <User className="h-3 w-3" />
+                      <span>{note.user?.username || 'Unknown'}</span>
+                      <span>•</span>
+                      <span>{new Date(note.created_at).toLocaleString()}</span>
+                    </div>
                   </div>
                 ))
               )}
@@ -484,59 +575,145 @@ export default function LeadDetailPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Messages</CardTitle>
-            <CardDescription>Internal conversations about this lead</CardDescription>
+            <div className="flex items-center justify-between">
+              <CardTitle>Follow-ups</CardTitle>
+              {hasPermission('leads', 'write') && (
+                <Button size="sm" onClick={() => setShowFollowUpDialog(true)}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Schedule
+                </Button>
+              )}
+            </div>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-3 max-h-[400px] overflow-y-auto">
-              {messages.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-4">No messages yet</p>
+          <CardContent>
+            <div className="space-y-4">
+              {followUps.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  No follow-ups scheduled
+                </p>
               ) : (
-                messages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={`p-3 rounded-md space-y-1 ${
-                      message.user_id === profile?.id
-                        ? 'bg-primary text-primary-foreground ml-8'
-                        : 'bg-muted mr-8'
-                    }`}
-                  >
+                followUps.map((followUp) => (
+                  <div key={followUp.id} className="border rounded-lg p-4 space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">{message.user?.username}</span>
-                      <span className="text-xs opacity-70">
-                        {new Date(message.created_at).toLocaleString()}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <Clock className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm font-medium">
+                          {new Date(followUp.follow_up_date).toLocaleString()}
+                        </span>
+                      </div>
+                      <Badge variant={followUp.status === 'completed' ? 'default' : 'secondary'}>
+                        {followUp.status}
+                      </Badge>
                     </div>
-                    <p className="text-sm">{message.content}</p>
+                    {followUp.notes && (
+                      <p className="text-sm text-muted-foreground">{followUp.notes}</p>
+                    )}
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <User className="h-3 w-3" />
+                      <span>{followUp.user?.username || 'Unknown'}</span>
+                    </div>
                   </div>
                 ))
               )}
             </div>
-
-            {hasPermission('messages', 'write') && (
-              <>
-                <Separator />
-                <div className="space-y-2">
-                  <Input
-                    placeholder="Type a message..."
-                    value={newMessage}
-                    onChange={(e) => setNewMessage(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        handleAddMessage();
-                      }
-                    }}
-                  />
-                  <Button onClick={handleAddMessage} disabled={!newMessage.trim()}>
-                    Send Message
-                  </Button>
-                </div>
-              </>
-            )}
           </CardContent>
         </Card>
       </div>
+
+      {/* Note Dialog */}
+      <Dialog open={showNoteDialog} onOpenChange={setShowNoteDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingNote ? 'Edit Note' : 'Add Note'}</DialogTitle>
+            <DialogDescription>
+              {editingNote ? 'Update the note details' : 'Add a new note to this lead'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="note_type">Note Type</Label>
+              <Select value={noteType} onValueChange={setNoteType}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="general">General</SelectItem>
+                  <SelectItem value="pending_reason">Pending Reason</SelectItem>
+                  <SelectItem value="remainder_reason">Remainder Reason</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="note_content">Content</Label>
+              <Textarea
+                id="note_content"
+                value={newNote}
+                onChange={(e) => setNewNote(e.target.value)}
+                placeholder="Enter note content..."
+                rows={4}
+              />
+            </div>
+            {(noteType === 'pending_reason' || noteType === 'remainder_reason') && (
+              <div>
+                <Label htmlFor="note_reason">Reason</Label>
+                <Input
+                  id="note_reason"
+                  value={noteReason}
+                  onChange={(e) => setNoteReason(e.target.value)}
+                  placeholder="Enter reason..."
+                />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowNoteDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveNote}>
+              {editingNote ? 'Update' : 'Add'} Note
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Follow-up Dialog */}
+      <Dialog open={showFollowUpDialog} onOpenChange={setShowFollowUpDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Schedule Follow-up</DialogTitle>
+            <DialogDescription>
+              Set a reminder to follow up with this lead
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="follow_up_date">Follow-up Date & Time</Label>
+              <Input
+                id="follow_up_date"
+                type="datetime-local"
+                value={followUpDate}
+                onChange={(e) => setFollowUpDate(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label htmlFor="follow_up_notes">Notes</Label>
+              <Textarea
+                id="follow_up_notes"
+                value={followUpNotes}
+                onChange={(e) => setFollowUpNotes(e.target.value)}
+                placeholder="Add notes for this follow-up..."
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowFollowUpDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateFollowUp}>Schedule</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
