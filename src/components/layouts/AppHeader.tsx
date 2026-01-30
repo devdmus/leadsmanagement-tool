@@ -1,6 +1,7 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { NotificationCenter } from '@/components/common/NotificationCenter';
+import { useNavigate } from 'react-router-dom';
 
 type Profile = {
   id: string;
@@ -27,6 +28,7 @@ import { AppSidebar } from './AppSidebar';
 
 export function AppHeader() {
   const { profile, signOut } = useAuth();
+  const navigate = useNavigate();
 
   const handleSignOut = async () => {
     await signOut();
@@ -86,7 +88,7 @@ export function AppHeader() {
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuLabel>My Account</DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem>
+                <DropdownMenuItem onClick={() => navigate('/profile')}>
                   <User className="mr-2 h-4 w-4" />
                   <span>Profile</span>
                 </DropdownMenuItem>

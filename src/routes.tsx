@@ -1,10 +1,13 @@
 import LoginPage from './pages/LoginPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
 import DashboardPage from './pages/DashboardPage';
 import LeadsPageEnhanced from './pages/LeadsPageEnhanced';
 import LeadDetailPage from './pages/LeadDetailPage';
 import SeoPage from './pages/SeoPage';
 import UsersPage from './pages/UsersPage';
 import UserProfilePage from './pages/UserProfilePage';
+import ProfilePage from './pages/ProfilePage';
 import PermissionsPage from './pages/PermissionsPage';
 import ActivityPage from './pages/ActivityPage';
 import SubscriptionPage from './pages/SubscriptionPage';
@@ -49,6 +52,11 @@ const routes: RouteConfig[] = [
     element: <UserProfilePage />
   },
   {
+    name: 'My Profile',
+    path: '/profile',
+    element: <ProfilePage />
+  },
+  {
     name: 'Permissions',
     path: '/permissions',
     element: <PermissionsPage />
@@ -67,6 +75,16 @@ const routes: RouteConfig[] = [
     name: 'Login',
     path: '/login',
     element: <LoginPage />
+  },
+  {
+    name: 'Forgot Password',
+    path: '/forgot-password',
+    element: <ForgotPasswordPage />
+  },
+  {
+    name: 'Reset Password',
+    path: '/reset-password',
+    element: <ResetPasswordPage />
   }
 ];
 

@@ -104,7 +104,17 @@ export default function LoginPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="login-password">Password</Label>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="login-password">Password</Label>
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="px-0 text-xs"
+                      onClick={() => navigate('/forgot-password')}
+                    >
+                      Forgot password?
+                    </Button>
+                  </div>
                   <Input
                     id="login-password"
                     type="password"
