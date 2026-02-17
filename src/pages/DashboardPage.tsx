@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { leadsApi } from '@/db/api';
+import { wpLeadsApi } from '@/db/wpLeadsApi';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { Users, CheckCircle, Clock, AlertCircle } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -18,6 +18,7 @@ export default function DashboardPage() {
       linkedin: number;
       form: number;
       seo: number;
+      website: number;
     };
   } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -28,8 +29,23 @@ export default function DashboardPage() {
 
   const loadStats = async () => {
     try {
-      const data = await leadsApi.getStats();
-      setStats(data);
+      const data = await wpLeadsApi.getAll();
+
+      const stats = {
+        total: data.length,
+        pending: data.filter((l: any) => l.status === 'pending').length,
+        completed: data.filter((l: any) => l.status === 'completed').length,
+        remainder: data.filter((l: any) => l.status === 'remainder').length,
+        bySource: {
+          facebook: data.filter((l: any) => l.source === 'facebook').length,
+          linkedin: data.filter((l: any) => l.source === 'linkedin').length,
+          form: data.filter((l: any) => l.source === 'form').length,
+          seo: data.filter((l: any) => l.source === 'seo').length,
+          website: data.filter((l: any) => l.source === 'website').length,
+        }
+      };
+
+      setStats(stats);
     } catch (error) {
       console.error('Failed to load stats:', error);
     } finally {
@@ -42,12 +58,13 @@ export default function DashboardPage() {
     { name: 'LinkedIn', value: stats.bySource.linkedin },
     { name: 'Form', value: stats.bySource.form },
     { name: 'SEO', value: stats.bySource.seo },
+    { name: 'Website', value: stats.bySource.website },
   ] : [];
 
   const statusData = stats ? [
     { name: 'Pending', value: stats.pending },
     { name: 'Completed', value: stats.completed },
-    { name: 'Remainder', value: stats.remainder },
+    { name: 'Reminder', value: stats.remainder },
   ] : [];
 
   if (loading) {
@@ -123,7 +140,7 @@ export default function DashboardPage() {
 
         <Card className="hover:shadow-lg transition-shadow">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Remainder</CardTitle>
+            <CardTitle className="text-sm font-medium">Reminder</CardTitle>
             <AlertCircle className="h-4 w-4 text-info" />
           </CardHeader>
           <CardContent>
@@ -144,18 +161,18 @@ export default function DashboardPage() {
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={sourceData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                <XAxis dataKey="name" stroke="hsl(var(--foreground))" />
-                <YAxis stroke="hsl(var(--foreground))" />
-                <Tooltip 
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                <XAxis dataKey="name" stroke="hsl(var(--foreground))" tickLine={false} axisLine={false} />
+                <YAxis stroke="hsl(var(--foreground))" tickLine={false} axisLine={false} allowDecimals={false} />
+                <Tooltip
+                  cursor={{ fill: 'hsl(var(--muted))' }}
                   contentStyle={{
                     backgroundColor: 'hsl(var(--card))',
                     border: '1px solid hsl(var(--border))',
                     borderRadius: '8px',
                   }}
                 />
-                <Legend />
-                <Bar dataKey="value" fill="hsl(var(--primary))" radius={[8, 8, 0, 0]} />
+                <Bar dataKey="value" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} maxBarSize={50} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
@@ -173,23 +190,23 @@ export default function DashboardPage() {
                   data={statusData}
                   cx="50%"
                   cy="50%"
-                  labelLine={false}
-                  label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                  innerRadius={60}
                   outerRadius={80}
-                  fill="hsl(var(--primary))"
+                  paddingAngle={5}
                   dataKey="value"
                 >
-                  {statusData.map((entry, index) => (
+                  {statusData.map((_, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip 
+                <Tooltip
                   contentStyle={{
                     backgroundColor: 'hsl(var(--card))',
                     border: '1px solid hsl(var(--border))',
                     borderRadius: '8px',
                   }}
                 />
+                <Legend verticalAlign="bottom" height={36} iconType="circle" />
               </PieChart>
             </ResponsiveContainer>
           </CardContent>

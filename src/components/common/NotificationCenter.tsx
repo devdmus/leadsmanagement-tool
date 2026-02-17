@@ -9,7 +9,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/db/supabase';
+// Supabase removed
 import { cn } from '@/lib/utils';
 
 type Notification = {
@@ -39,86 +39,28 @@ export function NotificationCenter() {
   }, [profile]);
 
   const loadNotifications = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('notifications')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(50);
-
-      if (error) throw error;
-
-      const typedData = (data || []) as Notification[];
-      setNotifications(typedData);
-      setUnreadCount(typedData.filter(n => !n.is_read).length);
-    } catch (error) {
-      console.error('Failed to load notifications:', error);
-    }
+    // Mock notifications
+    setNotifications([]);
+    setUnreadCount(0);
   };
 
   const subscribeToNotifications = () => {
-    const channel = supabase
-      .channel('notifications')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'notifications',
-          filter: `user_id=eq.${profile?.id}`,
-        },
-        () => {
-          loadNotifications();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      channel.unsubscribe();
-    };
+    // Mock subscription
+    return () => { };
   };
 
   const markAsRead = async (notificationId: string) => {
-    try {
-      const { error } = await (supabase
-        .from('notifications')
-        .update({ is_read: true } as never)
-        .eq('id', notificationId) as never);
-
-      if (error) throw error;
-      loadNotifications();
-    } catch (error) {
-      console.error('Failed to mark notification as read:', error);
-    }
+    setNotifications(notifications.map(n => n.id === notificationId ? { ...n, is_read: true } : n));
+    setUnreadCount(prev => Math.max(0, prev - 1));
   };
 
   const markAllAsRead = async () => {
-    try {
-      const { error } = await (supabase
-        .from('notifications')
-        .update({ is_read: true } as never)
-        .eq('user_id', profile?.id as never)
-        .eq('is_read', false) as never);
-
-      if (error) throw error;
-      loadNotifications();
-    } catch (error) {
-      console.error('Failed to mark all as read:', error);
-    }
+    setNotifications(notifications.map(n => ({ ...n, is_read: true })));
+    setUnreadCount(0);
   };
 
   const deleteNotification = async (notificationId: string) => {
-    try {
-      const { error } = await supabase
-        .from('notifications')
-        .delete()
-        .eq('id', notificationId);
-
-      if (error) throw error;
-      loadNotifications();
-    } catch (error) {
-      console.error('Failed to delete notification:', error);
-    }
+    setNotifications(notifications.filter(n => n.id !== notificationId));
   };
 
   const getTypeColor = (type: string) => {

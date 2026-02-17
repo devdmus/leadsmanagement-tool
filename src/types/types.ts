@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'sales' | 'seo' | 'client';
+export type UserRole = 'super_admin' | 'admin' | 'sales_manager' | 'sales_person' | 'seo_manager' | 'seo_person' | 'client';
 export type LeadSource = 'facebook' | 'linkedin' | 'form' | 'seo';
 export type LeadStatus = 'pending' | 'completed' | 'remainder';
 
@@ -30,6 +30,7 @@ export type SeoMetaTag = {
   title: string;
   keywords: string | null;
   description: string | null;
+  assigned_to: string | null;
   created_at: string;
   updated_at: string;
 };

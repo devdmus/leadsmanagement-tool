@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { leadsApi, profilesApi, notesApi, activityLogsApi, followUpsApi } from '@/db/api';
+import { wpLeadsApi as leadsApi } from '@/db/wpLeadsApi';
+// @ts-ignore
+import { profilesApi, notesApi, activityLogsApi, followUpsApi } from '@/db/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { notificationHelper } from '@/lib/notificationHelper';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -80,6 +82,7 @@ type FollowUp = {
   notes: string | null;
   created_at: string;
   user?: Profile;
+  type?: string;
 };
 
 type LeadWithAssignee = Lead & {
@@ -107,12 +110,13 @@ export default function LeadDetailPage() {
   const [noteType, setNoteType] = useState('general');
   const [editingNote, setEditingNote] = useState<Note | null>(null);
   const [showNoteDialog, setShowNoteDialog] = useState(false);
-  
+
   const [showFollowUpDialog, setShowFollowUpDialog] = useState(false);
   const [editingFollowUp, setEditingFollowUp] = useState<FollowUp | null>(null);
   const [followUpDate, setFollowUpDate] = useState('');
   const [followUpNotes, setFollowUpNotes] = useState('');
   const [followUpStatus, setFollowUpStatus] = useState('pending');
+  const [followUpType, setFollowUpType] = useState('call');
 
   useEffect(() => {
     if (id) {
@@ -124,15 +128,25 @@ export default function LeadDetailPage() {
     if (!id) return;
 
     try {
-      const [leadData, usersData, notesData, followUpsData] = await Promise.all([
-        leadsApi.getById(id),
+      const [leadsData, usersData, notesData, followUpsData] = await Promise.all([
+        leadsApi.getAll(),
         profilesApi.getAll(),
         notesApi.getByLeadId(id),
         followUpsApi.getByLead(id),
       ]);
 
-      setLead(leadData as LeadWithAssignee);
-      setUsers(usersData as Profile[]);
+      const leadData = leadsData.find((l: any) => l.id.toString() === id.toString());
+
+      if (!leadData) {
+        throw new Error('Lead not found');
+      }
+
+      const allUsers = usersData as Profile[];
+      setLead({
+        ...leadData,
+        assignee: allUsers.find(u => u.id === leadData.assigned_to)
+      } as LeadWithAssignee);
+      setUsers(allUsers);
       setNotes(notesData as NoteWithUser[]);
       setFollowUps(followUpsData as FollowUp[]);
     } catch (error) {
@@ -339,6 +353,7 @@ export default function LeadDetailPage() {
           follow_up_date: followUpDate,
           notes: followUpNotes || undefined,
           status: followUpStatus,
+          type: followUpType,
         });
 
         await notificationHelper.notifyUserAndAdmins(
@@ -362,7 +377,11 @@ export default function LeadDetailPage() {
           user_id: profile.id as string,
           follow_up_date: followUpDate,
           notes: followUpNotes || undefined,
+          type: followUpType,
         });
+
+        // Auto-update lead status to remainder
+        await leadsApi.update(id, { status: 'remainder' });
 
         await notificationHelper.notifyUserAndAdmins(
           profile.id as string,
@@ -376,7 +395,7 @@ export default function LeadDetailPage() {
 
         toast({
           title: 'Success',
-          description: 'Follow-up scheduled successfully',
+          description: 'Follow-up scheduled & Lead marked as Remainder',
         });
       }
 
@@ -393,6 +412,7 @@ export default function LeadDetailPage() {
       setFollowUpDate('');
       setFollowUpNotes('');
       setFollowUpStatus('pending');
+      setFollowUpType('call');
       setEditingFollowUp(null);
       setShowFollowUpDialog(false);
       loadData();
@@ -540,6 +560,7 @@ export default function LeadDetailPage() {
     setFollowUpDate(followUp.follow_up_date);
     setFollowUpNotes(followUp.notes || '');
     setFollowUpStatus(followUp.status);
+    setFollowUpType(followUp.type || 'call');
     setShowFollowUpDialog(true);
   };
 
@@ -548,6 +569,7 @@ export default function LeadDetailPage() {
     setFollowUpDate('');
     setFollowUpNotes('');
     setFollowUpStatus('pending');
+    setFollowUpType('call');
     setShowFollowUpDialog(true);
   };
 
@@ -792,6 +814,11 @@ export default function LeadDetailPage() {
                           <span className="text-sm font-medium">
                             {new Date(followUp.follow_up_date).toLocaleString()}
                           </span>
+                          {followUp.type && (
+                            <Badge variant="outline" className="text-xs">
+                              {followUp.type}
+                            </Badge>
+                          )}
                         </div>
                         {followUp.notes && (
                           <p className="text-sm text-muted-foreground mt-2">{followUp.notes}</p>
@@ -930,6 +957,22 @@ export default function LeadDetailPage() {
                 value={followUpDate}
                 onChange={(e) => setFollowUpDate(e.target.value)}
               />
+            </div>
+            <div>
+              <Label htmlFor="follow_up_type">Interaction Type</Label>
+              <Select value={followUpType} onValueChange={setFollowUpType}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="call">Call</SelectItem>
+                  <SelectItem value="email">Email</SelectItem>
+                  <SelectItem value="meeting">Meeting</SelectItem>
+                  <SelectItem value="whatsapp">WhatsApp</SelectItem>
+                  <SelectItem value="linkedin">LinkedIn Message</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             {editingFollowUp && (
               <div>

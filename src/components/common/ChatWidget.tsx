@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { MessageSquare, X, Send, Users } from 'lucide-react';
+import { MessageSquare, X, Send, PlusCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -60,21 +60,25 @@ export function ChatWidget() {
   const [users, setUsers] = useState<Profile[]>([]);
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
   const [showNewChat, setShowNewChat] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+
   const { profile } = useAuth();
   const { toast } = useToast();
 
+  const filteredUsers = users.filter(u =>
+    u.username.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   useEffect(() => {
     if (isOpen) {
-      loadRooms();
-      loadUsers();
+      loadUsers().then(() => loadRooms());
     }
   }, [isOpen]);
 
   useEffect(() => {
     if (selectedRoom) {
       loadMessages(selectedRoom.id);
-      
-      // Subscribe to new messages
+
       const channel = chatApi.subscribeToMessages(selectedRoom.id, () => {
         loadMessages(selectedRoom.id);
       });
@@ -88,7 +92,15 @@ export function ChatWidget() {
   const loadRooms = async () => {
     try {
       const data = await chatApi.getRooms();
-      setRooms(data as ChatRoom[]);
+      const mappedRooms = data.map((room: any) => ({
+        id: room.id,
+        name: room.name || null,
+        is_group: room.users.length > 2,
+        participants: room.users.map((uid: string) => ({
+          user: users.find(u => u.id === uid) || { id: uid, username: 'User', role: 'member' }
+        }))
+      }));
+      setRooms(mappedRooms);
     } catch (error) {
       console.error('Failed to load rooms:', error);
     }
@@ -129,15 +141,43 @@ export function ChatWidget() {
     }
   };
 
-  const handleCreateChat = async () => {
-    if (selectedUsers.length === 0) return;
+  const handleCreateChat = async (userIds?: string[]) => {
+    const targetUsers = userIds || selectedUsers;
+    if (targetUsers.length === 0) return;
 
     try {
-      const room = await chatApi.createRoom(selectedUsers);
+      const currentUserId = (profile?.id as string) || '';
+      if (!currentUserId) return;
+
+      const roomUsers: string[] = [...targetUsers, currentUserId];
+      const room = await chatApi.createRoom(roomUsers);
+
+      const newRoom: ChatRoom = {
+        id: room.id,
+        name: null,
+        is_group: roomUsers.length > 2,
+        participants: roomUsers.map(uid => {
+          if (uid === currentUserId) {
+            return {
+              user: {
+                id: uid,
+                username: 'You',
+                role: String(profile?.role || 'user')
+              }
+            };
+          }
+          const found = users.find(u => u.id === uid);
+          return {
+            user: found || { id: uid, username: 'User', role: 'member' }
+          };
+        })
+      };
+
       setShowNewChat(false);
       setSelectedUsers([]);
-      loadRooms();
-      setSelectedRoom(room as ChatRoom);
+      setRooms([newRoom, ...rooms]);
+      setSelectedRoom(newRoom);
+
       toast({
         title: 'Success',
         description: 'Chat created successfully',
@@ -165,25 +205,25 @@ export function ChatWidget() {
     <>
       <Button
         onClick={() => setIsOpen(!isOpen)}
-        className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-lg z-50"
+        className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-lg z-40"
         size="icon"
       >
         {isOpen ? <X className="h-6 w-6" /> : <MessageSquare className="h-6 w-6" />}
       </Button>
 
       {isOpen && (
-        <Card className="fixed bottom-24 right-6 w-96 h-[600px] shadow-2xl z-50 flex flex-col">
+        <Card className="fixed bottom-24 right-4 left-4 sm:left-auto sm:right-6 w-auto sm:w-96 h-[65vh] sm:h-[500px] shadow-2xl z-50 flex flex-col">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-lg">Messages</CardTitle>
+              <CardTitle className="text-lg">Team Chat</CardTitle>
               <Dialog open={showNewChat} onOpenChange={setShowNewChat}>
                 <DialogTrigger asChild>
-                  <Button size="sm" variant="outline">
-                    <Users className="h-4 w-4 mr-2" />
+                  <Button size="sm">
+                    <PlusCircle className="h-4 w-4 mr-2" />
                     New Chat
                   </Button>
                 </DialogTrigger>
-                <DialogContent>
+                <DialogContent className="z-[100]">
                   <DialogHeader>
                     <DialogTitle>Start New Chat</DialogTitle>
                     <DialogDescription>
@@ -193,7 +233,13 @@ export function ChatWidget() {
                   <div className="space-y-4">
                     <ScrollArea className="h-[300px]">
                       <div className="space-y-2">
-                        {users.map((user) => (
+                        <Input
+                          placeholder="Search users..."
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          className="mb-2"
+                        />
+                        {filteredUsers.map((user) => (
                           <div key={user.id} className="flex items-center space-x-2">
                             <Checkbox
                               checked={selectedUsers.includes(user.id)}
@@ -218,8 +264,8 @@ export function ChatWidget() {
                         ))}
                       </div>
                     </ScrollArea>
-                    <Button onClick={handleCreateChat} className="w-full" disabled={selectedUsers.length === 0}>
-                      Create Chat
+                    <Button onClick={() => handleCreateChat()} className="w-full" disabled={selectedUsers.length === 0}>
+                      Create Group Chat
                     </Button>
                   </div>
                 </DialogContent>
@@ -232,31 +278,99 @@ export function ChatWidget() {
               <ScrollArea className="flex-1 p-4">
                 <div className="space-y-2">
                   {rooms.length === 0 ? (
-                    <div className="text-center text-muted-foreground py-8">
-                      No conversations yet. Start a new chat!
+                    <div className="space-y-4">
+
+                      {users.length === 0 ? (
+                        <div className="text-center text-xs text-muted-foreground">No other users found.</div>
+                      ) : (
+                        <>
+                          <p className="text-center text-muted-foreground text-sm py-2">Start a conversation:</p>
+                          <Input
+                            placeholder="Search users..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="mb-2"
+                          />
+                          {filteredUsers.length === 0 ? (
+                            <div className="text-center text-xs text-muted-foreground">No users found.</div>
+                          ) : (
+                            filteredUsers.map((user) => (
+                              <div
+                                key={user.id}
+                                className="flex items-center gap-3 p-3 hover:bg-muted rounded-lg cursor-pointer border transition-colors"
+                                onClick={() => handleCreateChat([user.id])}
+                              >
+                                <Avatar className="h-8 w-8">
+                                  <AvatarFallback>{user.username.charAt(0).toUpperCase()}</AvatarFallback>
+                                </Avatar>
+                                <div>
+                                  <p className="text-sm font-medium">{user.username}</p>
+                                  <Badge variant="secondary" className="text-[10px]">{user.role}</Badge>
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </>
+                      )}
                     </div>
                   ) : (
-                    rooms.map((room) => (
-                      <div
-                        key={room.id}
-                        onClick={() => setSelectedRoom(room)}
-                        className="p-3 hover:bg-muted rounded-lg cursor-pointer transition-colors"
-                      >
-                        <div className="flex items-center gap-2">
-                          <Avatar className="h-10 w-10">
-                            <AvatarFallback>
-                              {getRoomName(room).charAt(0).toUpperCase()}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="flex-1">
-                            <p className="font-medium text-sm">{getRoomName(room)}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {room.is_group ? 'Group Chat' : 'Direct Message'}
-                            </p>
+                    <>
+                      <div className="mb-4">
+                        <Input
+                          placeholder="Search chats or users..."
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                        />
+                        {searchQuery && filteredUsers.length > 0 && (
+                          <div className="mt-2 space-y-2">
+                            <p className="text-xs font-semibold text-muted-foreground px-2">New Chats</p>
+                            {filteredUsers.map((user) => (
+                              <div
+                                key={user.id}
+                                className="flex items-center gap-3 p-2 hover:bg-muted rounded-lg cursor-pointer border transition-colors"
+                                onClick={() => {
+                                  handleCreateChat([user.id]);
+                                  setSearchQuery('');
+                                }}
+                              >
+                                <Avatar className="h-6 w-6">
+                                  <AvatarFallback>{user.username.charAt(0).toUpperCase()}</AvatarFallback>
+                                </Avatar>
+                                <span className="text-sm">{user.username}</span>
+                              </div>
+                            ))}
                           </div>
-                        </div>
+                        )}
                       </div>
-                    ))
+
+                      {searchQuery && rooms.some(r => getRoomName(r).toLowerCase().includes(searchQuery.toLowerCase())) && (
+                        <p className="text-xs font-semibold text-muted-foreground px-2 mb-2">Recent Chats</p>
+                      )}
+
+                      {rooms
+                        .filter(room => getRoomName(room).toLowerCase().includes(searchQuery.toLowerCase()))
+                        .map((room) => (
+                          <div
+                            key={room.id}
+                            onClick={() => setSelectedRoom(room)}
+                            className="p-3 hover:bg-muted rounded-lg cursor-pointer transition-colors"
+                          >
+                            <div className="flex items-center gap-2">
+                              <Avatar className="h-10 w-10">
+                                <AvatarFallback>
+                                  {getRoomName(room).charAt(0).toUpperCase()}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="flex-1">
+                                <p className="font-medium text-sm">{getRoomName(room)}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {room.is_group ? 'Group Chat' : 'Direct Message'}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                    </>
                   )}
                 </div>
               </ScrollArea>
@@ -291,11 +405,10 @@ export function ChatWidget() {
                               </p>
                             )}
                             <div
-                              className={`rounded-lg p-3 ${
-                                isOwn
-                                  ? 'bg-primary text-primary-foreground'
-                                  : 'bg-muted'
-                              }`}
+                              className={`rounded-lg p-3 ${isOwn
+                                ? 'bg-primary text-primary-foreground'
+                                : 'bg-muted'
+                                }`}
                             >
                               <p className="text-sm">{message.content}</p>
                             </div>
