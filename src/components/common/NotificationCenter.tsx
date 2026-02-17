@@ -79,8 +79,10 @@ export function NotificationCenter() {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative">
-          <Bell className="h-5 w-5" />
+        {/* changed css */}
+        <Button variant="ghost" size="icon" className="relative hover:bg-muted/30">
+          {/* css changed  */} 
+          <Bell className="h-5 w-5 text-white " />
           {unreadCount > 0 && (
             <Badge
               variant="destructive"

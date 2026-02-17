@@ -991,6 +991,8 @@ export default function BlogsPage() {
               </Label>
               <Textarea
                 id="description"
+                // change to textarea for better UX
+                className='mt-2'
                 value={formData.description}
                 onChange={(e) =>
                   setFormData({ ...formData, description: e.target.value })
@@ -1006,7 +1008,8 @@ export default function BlogsPage() {
 
             <div>
               <Label htmlFor="content">Full Content</Label>
-              <div className="border rounded-md overflow-hidden">
+              {/* changed css */}
+              <div className="border rounded-md overflow-hidden mt-2">
                 <ReactQuill
                   theme="snow"
                   value={formData.content}
@@ -1030,7 +1033,8 @@ export default function BlogsPage() {
 
             <div>
               <Label>Feature Image</Label>
-              <div className="space-y-2">
+              {/* changed css */}
+              <div className="space-y-2 mt-2">
                 {formData.feature_image ? (
                   <div className="relative">
                     <img
@@ -1129,7 +1133,8 @@ export default function BlogsPage() {
             </div>
 
             <div>
-              <Label>Tags</Label>
+              {/* changed css */}
+              <Label className='mb-2'>Tags</Label>
               <Popover>
                 <PopoverTrigger asChild>
                   <Button variant="outline" className="w-full justify-start">
