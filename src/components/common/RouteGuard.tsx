@@ -20,7 +20,7 @@ function matchPublicRoute(path: string, patterns: string[]) {
 }
 
 export function RouteGuard({ children }: RouteGuardProps) {
-  const { user, loading } = useAuth();
+  const { profile, loading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -29,10 +29,10 @@ export function RouteGuard({ children }: RouteGuardProps) {
 
     const isPublic = matchPublicRoute(location.pathname, PUBLIC_ROUTES);
 
-    if (!user && !isPublic) {
+    if (!profile && !isPublic) {
       navigate('/login', { state: { from: location.pathname }, replace: true });
     }
-  }, [user, loading, location.pathname, navigate]);
+  }, [profile, loading, location.pathname, navigate]);
 
   if (loading) {
     return (

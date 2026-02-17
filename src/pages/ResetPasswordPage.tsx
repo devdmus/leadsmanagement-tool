@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '@/db/supabase';
+// Supabase removed
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,7 +18,9 @@ export default function ResetPasswordPage() {
   const { toast } = useToast();
 
   useEffect(() => {
-    // Check if we have a valid session from the reset link
+    // Mock token validation
+    setValidToken(true);
+    /*
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
         setValidToken(true);
@@ -31,6 +33,7 @@ export default function ResetPasswordPage() {
         setTimeout(() => navigate('/forgot-password'), 3000);
       }
     });
+    */
   }, [navigate, toast]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -66,9 +69,13 @@ export default function ResetPasswordPage() {
     setLoading(true);
 
     try {
-      const { error } = await supabase.auth.updateUser({
-        password: password,
-      });
+      // Mock password update
+      console.log('Updating password to:', password);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      // const { error } = await supabase.auth.updateUser({
+      //   password: password,
+      // });
+      const error = null;
 
       if (error) throw error;
 

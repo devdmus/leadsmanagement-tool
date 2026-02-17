@@ -6,6 +6,8 @@ import LeadsPageEnhanced from './pages/LeadsPageEnhanced';
 import LeadDetailPage from './pages/LeadDetailPage';
 import SeoPage from './pages/SeoPage';
 import BlogsPage from './pages/BlogsPage';
+import SitesPage from './pages/SitesPage';
+import IPSecurityPage from './pages/IPSecurityPage';
 import UsersPage from './pages/UsersPage';
 import UserProfilePage from './pages/UserProfilePage';
 import ProfilePage from './pages/ProfilePage';
@@ -46,6 +48,16 @@ const routes: RouteConfig[] = [
     name: 'Blogs',
     path: '/blogs',
     element: <BlogsPage />
+  },
+  {
+    name: 'Sites',
+    path: '/sites',
+    element: <SitesPage />
+  },
+  {
+    name: 'IP Security',
+    path: '/ip-security',
+    element: <IPSecurityPage />
   },
   {
     name: 'User Management',
@@ -95,3 +107,4 @@ const routes: RouteConfig[] = [
 ];
 
 export default routes;
+

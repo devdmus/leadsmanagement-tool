@@ -1,918 +1,315 @@
-import { supabase } from './supabase';
+import { wpLeadsApi } from './wpLeadsApi';
 
-type UserRole = 'admin' | 'sales' | 'seo' | 'client';
-type LeadSource = 'facebook' | 'linkedin' | 'form' | 'seo';
-type LeadStatus = 'pending' | 'completed' | 'remainder';
+// Mock data generator for IDs
+const genId = () => Math.random().toString(36).substr(2, 9);
 
-export type Profile = {
-  id: string;
-  username: string;
-  email: string | null;
-  phone: string | null;
-  role: UserRole;
-  is_client_paid: boolean;
-  subscription_plan: string | null;
-  subscription_start: string | null;
-  subscription_end: string | null;
-  created_at: string;
-  updated_at: string;
-};
+// LocalStorage persistence for Mocks
+const getLS = (key: string) => JSON.parse(localStorage.getItem(key) || '[]');
+const setLS = (key: string, data: any) => localStorage.setItem(key, JSON.stringify(data));
 
-type Lead = {
-  id: string;
-  name: string;
-  email: string;
-  phone: string | null;
-  source: LeadSource;
-  status: LeadStatus;
-  assigned_to: string | null;
-  created_at: string;
-  updated_at: string;
-};
+// Leads API (Pointing to wpLeadsApi)
+export const leadsApi = wpLeadsApi;
 
-type SeoMetaTag = {
-  id: string;
-  page_identifier: string;
-  title: string;
-  keywords: string | null;
-  description: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-export type Note = {
-  id: string;
-  lead_id: string;
-  user_id: string;
-  content: string;
-  note_type?: string | null;
-  reason?: string | null;
-  created_at: string;
-};
-
-type ActivityLog = {
-  id: string;
-  user_id: string;
-  action: string;
-  resource_type: string;
-  resource_id: string | null;
-  details: Record<string, unknown> | null;
-  created_at: string;
-};
-
-type RolePermission = {
-  id: string;
-  role: UserRole;
-  feature: string;
-  can_read: boolean;
-  can_write: boolean;
-  created_at: string;
-  updated_at: string;
-};
-
-type LeadWithAssignee = Lead & {
-  assignee?: Profile | null;
-};
-
-type NoteWithUser = Note & {
-  user?: Profile;
+// SEO Meta Tags API Mock
+export const seoMetaTagsApi = {
+    async getAll() {
+        return getLS('crm_seo_meta');
+    },
+    async create(data: any) {
+        const items = getLS('crm_seo_meta');
+        const newItem = { id: genId(), ...data, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+        items.unshift(newItem);
+        setLS('crm_seo_meta', items);
+        return newItem;
+    },
+    async update(id: string, data: any) {
+        const items = getLS('crm_seo_meta');
+        const idx = items.findIndex((i: any) => i.id === id);
+        if (idx > -1) {
+            items[idx] = { ...items[idx], ...data, updated_at: new Date().toISOString() };
+            setLS('crm_seo_meta', items);
+            return items[idx];
+        }
+        return { id, ...data };
+    },
+    async delete(id: string) {
+        let items = getLS('crm_seo_meta');
+        items = items.filter((i: any) => i.id !== id);
+        setLS('crm_seo_meta', items);
+        return { success: true };
+    }
 };
 
 // Profiles API
 export const profilesApi = {
-  getAll: async (): Promise<Profile[]> => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .order('created_at', { ascending: false });
-    
-    if (error) throw error;
-    return Array.isArray(data) ? data : [];
-  },
+    async getAll() {
+        try {
+            const saved = localStorage.getItem('wp_credentials');
+            if (saved) {
+                const creds = JSON.parse(saved);
+                const auth = 'Basic ' + btoa(`${creds.username}:${creds.password}`);
 
-  getById: async (id: string): Promise<Profile | null> => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', id)
-      .maybeSingle();
-    
-    if (error) throw error;
-    return data;
-  },
+                const res = await fetch('https://digitmarketus.com/Bhairavi/wp-json/wp/v2/users?context=view', {
+                    headers: { 'Authorization': auth }
+                });
 
-  update: async (id: string, updates: Partial<Profile>): Promise<Profile | null> => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .maybeSingle();
-    
-    if (error) throw error;
-    return data;
-  },
+                if (res.ok) {
+                    const wpUsers = await res.json();
+                    return wpUsers.map((u: any) => {
+                        let role = 'client';
+                        if (u.roles?.includes('administrator')) role = 'admin';
+                        else if (u.roles?.includes('editor') || u.roles?.includes('seo_manager')) role = 'seo';
+                        else if (u.roles?.includes('author') || u.roles?.includes('contributor')) role = 'sales';
 
-  delete: async (id: string): Promise<void> => {
-    const { error } = await supabase
-      .from('profiles')
-      .delete()
-      .eq('id', id);
-    
-    if (error) throw error;
-  },
-};
+                        return {
+                            id: u.id.toString(),
+                            username: u.name || u.slug,
+                            email: u.email || '',
+                            role: role,
+                            created_at: new Date().toISOString(), // Mock, as WP doesn't expose reg date easily in simple view
+                            updated_at: new Date().toISOString()
+                        };
+                    });
+                }
+            }
+        } catch (e) {
+            console.warn('Failed to fetch WP users, falling back to mocks', e);
+        }
 
-// Leads API
-export const leadsApi = {
-  getAll: async (): Promise<LeadWithAssignee[]> => {
-    const { data, error } = await supabase
-      .from('leads')
-      .select(`
-        *,
-        assignee:profiles!leads_assigned_to_fkey(*)
-      `)
-      .order('created_at', { ascending: false });
-    
-    if (error) throw error;
-    return Array.isArray(data) ? data : [];
-  },
-
-  getById: async (id: string): Promise<LeadWithAssignee | null> => {
-    const { data, error } = await supabase
-      .from('leads')
-      .select(`
-        *,
-        assignee:profiles!leads_assigned_to_fkey(*)
-      `)
-      .eq('id', id)
-      .maybeSingle();
-    
-    if (error) throw error;
-    return data;
-  },
-
-  getByAssignee: async (userId: string): Promise<LeadWithAssignee[]> => {
-    const { data, error } = await supabase
-      .from('leads')
-      .select(`
-        *,
-        assignee:profiles!leads_assigned_to_fkey(*)
-      `)
-      .eq('assigned_to', userId)
-      .order('created_at', { ascending: false });
-    
-    if (error) throw error;
-    return Array.isArray(data) ? data : [];
-  },
-
-  getByStatus: async (status: LeadStatus): Promise<LeadWithAssignee[]> => {
-    const { data, error } = await supabase
-      .from('leads')
-      .select(`
-        *,
-        assignee:profiles!leads_assigned_to_fkey(*)
-      `)
-      .eq('status', status)
-      .order('created_at', { ascending: false });
-    
-    if (error) throw error;
-    return Array.isArray(data) ? data : [];
-  },
-
-  getBySource: async (source: LeadSource): Promise<LeadWithAssignee[]> => {
-    const { data, error } = await supabase
-      .from('leads')
-      .select(`
-        *,
-        assignee:profiles!leads_assigned_to_fkey(*)
-      `)
-      .eq('source', source)
-      .order('created_at', { ascending: false });
-    
-    if (error) throw error;
-    return Array.isArray(data) ? data : [];
-  },
-
-  create: async (lead: Omit<Lead, 'id' | 'created_at' | 'updated_at'>): Promise<Lead | null> => {
-    const { data, error } = await supabase
-      .from('leads')
-      .insert(lead)
-      .select()
-      .maybeSingle();
-    
-    if (error) throw error;
-    return data;
-  },
-
-  update: async (id: string, updates: Partial<Lead>): Promise<Lead | null> => {
-    const { data, error } = await supabase
-      .from('leads')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .maybeSingle();
-    
-    if (error) throw error;
-    return data;
-  },
-
-  delete: async (id: string): Promise<void> => {
-    const { error } = await supabase
-      .from('leads')
-      .delete()
-      .eq('id', id);
-    
-    if (error) throw error;
-  },
-
-  getStats: async () => {
-    const { data: allLeads, error } = await supabase
-      .from('leads')
-      .select('status, source');
-    
-    if (error) throw error;
-    
-    const leads = Array.isArray(allLeads) ? allLeads : [];
-    
-    return {
-      total: leads.length,
-      pending: leads.filter(l => l.status === 'pending').length,
-      completed: leads.filter(l => l.status === 'completed').length,
-      remainder: leads.filter(l => l.status === 'remainder').length,
-      bySource: {
-        facebook: leads.filter(l => l.source === 'facebook').length,
-        linkedin: leads.filter(l => l.source === 'linkedin').length,
-        form: leads.filter(l => l.source === 'form').length,
-        seo: leads.filter(l => l.source === 'seo').length,
-      },
-    };
-  },
-};
-
-// SEO Meta Tags API
-export const seoMetaTagsApi = {
-  getAll: async (): Promise<SeoMetaTag[]> => {
-    const { data, error } = await supabase
-      .from('seo_meta_tags')
-      .select('*')
-      .order('created_at', { ascending: false });
-    
-    if (error) throw error;
-    return Array.isArray(data) ? data : [];
-  },
-
-  getById: async (id: string): Promise<SeoMetaTag | null> => {
-    const { data, error } = await supabase
-      .from('seo_meta_tags')
-      .select('*')
-      .eq('id', id)
-      .maybeSingle();
-    
-    if (error) throw error;
-    return data;
-  },
-
-  getByPageIdentifier: async (pageIdentifier: string): Promise<SeoMetaTag | null> => {
-    const { data, error } = await supabase
-      .from('seo_meta_tags')
-      .select('*')
-      .eq('page_identifier', pageIdentifier)
-      .maybeSingle();
-    
-    if (error) throw error;
-    return data;
-  },
-
-  create: async (tag: Omit<SeoMetaTag, 'id' | 'created_at' | 'updated_at'>): Promise<SeoMetaTag | null> => {
-    const { data, error } = await supabase
-      .from('seo_meta_tags')
-      .insert(tag)
-      .select()
-      .maybeSingle();
-    
-    if (error) throw error;
-    return data;
-  },
-
-  update: async (id: string, updates: Partial<SeoMetaTag>): Promise<SeoMetaTag | null> => {
-    const { data, error } = await supabase
-      .from('seo_meta_tags')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .maybeSingle();
-    
-    if (error) throw error;
-    return data;
-  },
-
-  delete: async (id: string): Promise<void> => {
-    const { error } = await supabase
-      .from('seo_meta_tags')
-      .delete()
-      .eq('id', id);
-    
-    if (error) throw error;
-  },
-};
-
-// Notes API
-export const notesApi = {
-  getByLeadId: async (leadId: string): Promise<NoteWithUser[]> => {
-    const { data, error } = await supabase
-      .from('notes')
-      .select(`
-        *,
-        user:profiles!notes_user_id_fkey(*)
-      `)
-      .eq('lead_id', leadId)
-      .order('created_at', { ascending: false });
-    
-    if (error) throw error;
-    return Array.isArray(data) ? data : [];
-  },
-
-  create: async (note: Omit<Note, 'id' | 'created_at'>): Promise<Note | null> => {
-    const { data, error } = await supabase
-      .from('notes')
-      .insert(note)
-      .select()
-      .maybeSingle();
-    
-    if (error) throw error;
-    return data;
-  },
-
-  update: async (id: string, updates: Partial<Omit<Note, 'id' | 'created_at' | 'lead_id' | 'user_id'>>): Promise<Note | null> => {
-    const { data, error } = await supabase
-      .from('notes')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .maybeSingle();
-    
-    if (error) throw error;
-    return data;
-  },
-
-  delete: async (id: string): Promise<void> => {
-    const { error } = await supabase
-      .from('notes')
-      .delete()
-      .eq('id', id);
-    
-    if (error) throw error;
-  },
+        return [
+            { id: '1', username: 'Admin User', email: 'admin@example.com', role: 'admin' },
+            { id: '2', username: 'Sales Agent', email: 'sales@example.com', role: 'sales' },
+            { id: '3', username: 'SEO Specialist', email: 'seo@example.com', role: 'seo' },
+        ];
+    },
+    async getById(id: string) {
+        const users = await this.getAll();
+        return users.find((u: any) => u.id === id) || { id, username: 'User ' + id, role: 'sales' };
+    }
 };
 
 // Activity Logs API
 export const activityLogsApi = {
-  getAll: async (limit = 100): Promise<ActivityLog[]> => {
-    const { data, error} = await supabase
-      .from('activity_logs')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(limit);
-    
-    if (error) throw error;
-    return Array.isArray(data) ? data : [];
-  },
-
-  getByUserId: async (userId: string, limit = 50): Promise<ActivityLog[]> => {
-    const { data, error } = await supabase
-      .from('activity_logs')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(limit);
-    
-    if (error) throw error;
-    return Array.isArray(data) ? data : [];
-  },
-
-  create: async (log: Omit<ActivityLog, 'id' | 'created_at'>): Promise<void> => {
-    const { error } = await supabase
-      .from('activity_logs')
-      .insert(log);
-    
-    if (error) throw error;
-  },
-};
-
-// Role Permissions API
-export const rolePermissionsApi = {
-  getAll: async (): Promise<RolePermission[]> => {
-    const { data, error } = await supabase
-      .from('role_permissions')
-      .select('*')
-      .order('role', { ascending: true });
-    
-    if (error) throw error;
-    return Array.isArray(data) ? data : [];
-  },
-
-  getByRole: async (role: UserRole): Promise<RolePermission[]> => {
-    const { data, error } = await supabase
-      .from('role_permissions')
-      .select('*')
-      .eq('role', role);
-    
-    if (error) throw error;
-    return Array.isArray(data) ? data : [];
-  },
-
-  update: async (id: string, updates: Partial<RolePermission>): Promise<RolePermission | null> => {
-    const { data, error } = await supabase
-      .from('role_permissions')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .maybeSingle();
-    
-    if (error) throw error;
-    return data;
-  },
-};
-
-// Subscription Plans API
-export const subscriptionPlansApi = {
-  getAll: async () => {
-    const { data, error } = await supabase
-      .from('subscription_plans')
-      .select('*')
-      .eq('is_active', true)
-      .order('price', { ascending: true });
-    
-    if (error) throw error;
-    return Array.isArray(data) ? data : [];
-  },
-
-  updateProfileSubscription: async (userId: string, planId: string, startDate: string, endDate: string) => {
-    // Use raw SQL update to bypass type checking
-    const { error } = await supabase.rpc('exec_sql', {
-      sql: `UPDATE profiles SET subscription_plan_id = '${planId}', subscription_start_date = '${startDate}', subscription_end_date = '${endDate}', is_client_paid = true WHERE id = '${userId}'`
-    });
-    
-    if (error) {
-      // Fallback to direct update with type assertion
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .update({
-          subscription_plan_id: planId,
-          subscription_start_date: startDate,
-          subscription_end_date: endDate,
-          is_client_paid: true,
-        } as never)
-        .eq('id', userId);
-      
-      if (updateError) throw updateError;
+    async getAll() {
+        return getLS('crm_activity_logs');
+    },
+    async create(data: any) {
+        const logs = getLS('crm_activity_logs');
+        const newLog = { id: genId(), ...data, created_at: new Date().toISOString() };
+        logs.unshift(newLog);
+        setLS('crm_activity_logs', logs);
+        return newLog;
     }
-  },
+};
+
+// Notes API
+export const notesApi = {
+    async getByLeadId(leadId: string) {
+        const notes = getLS('crm_notes');
+        return notes.filter((n: any) => n.lead_id === leadId);
+    },
+    async create(data: any) {
+        const notes = getLS('crm_notes');
+        const newNote = { id: genId(), ...data, created_at: new Date().toISOString() };
+        notes.unshift(newNote);
+        setLS('crm_notes', notes);
+        return newNote;
+    },
+    async update(id: string, data: any) {
+        const notes = getLS('crm_notes');
+        const idx = notes.findIndex((n: any) => n.id === id);
+        if (idx > -1) {
+            notes[idx] = { ...notes[idx], ...data };
+            setLS('crm_notes', notes);
+            return notes[idx];
+        }
+        return { id, ...data };
+    },
+    async delete(id: string) {
+        let notes = getLS('crm_notes');
+        notes = notes.filter((n: any) => n.id !== id);
+        setLS('crm_notes', notes);
+        return { success: true };
+    }
 };
 
 // Follow-ups API
 export const followUpsApi = {
-  getAll: async () => {
-    const { data, error } = await supabase
-      .from('follow_ups')
-      .select('*, lead:leads(*), user:profiles(*)')
-      .order('follow_up_date', { ascending: true });
-    
-    if (error) throw error;
-    return Array.isArray(data) ? data : [];
-  },
-
-  getByLead: async (leadId: string) => {
-    const { data, error } = await supabase
-      .from('follow_ups')
-      .select('*, user:profiles(*)')
-      .eq('lead_id', leadId)
-      .order('follow_up_date', { ascending: true });
-    
-    if (error) throw error;
-    return Array.isArray(data) ? data : [];
-  },
-
-  create: async (followUp: {
-    lead_id: string;
-    user_id: string;
-    follow_up_date: string;
-    notes?: string;
-  }) => {
-    const { data, error } = await supabase
-      .from('follow_ups')
-      .insert(followUp)
-      .select()
-      .maybeSingle();
-    
-    if (error) throw error;
-    return data;
-  },
-
-  update: async (id: string, updates: { status?: string; notes?: string; follow_up_date?: string }) => {
-    const { data, error } = await supabase
-      .from('follow_ups')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .maybeSingle();
-    
-    if (error) throw error;
-    return data;
-  },
-
-  delete: async (id: string) => {
-    const { error } = await supabase
-      .from('follow_ups')
-      .delete()
-      .eq('id', id);
-    
-    if (error) throw error;
-  },
+    async getAll() {
+        return getLS('crm_followups');
+    },
+    async getByLead(leadId: string) {
+        const items = getLS('crm_followups');
+        return items.filter((i: any) => i.lead_id === leadId);
+    },
+    async create(data: any) {
+        const items = getLS('crm_followups');
+        const newItem = { id: genId(), ...data, created_at: new Date().toISOString() };
+        items.unshift(newItem);
+        setLS('crm_followups', items);
+        return newItem;
+    },
+    async update(id: string, data: any) {
+        const items = getLS('crm_followups');
+        const idx = items.findIndex((i: any) => i.id === id);
+        if (idx > -1) {
+            items[idx] = { ...items[idx], ...data };
+            setLS('crm_followups', items);
+            return items[idx];
+        }
+        return { id, ...data };
+    },
+    async delete(id: string) {
+        let items = getLS('crm_followups');
+        items = items.filter((i: any) => i.id !== id);
+        setLS('crm_followups', items);
+        return { success: true };
+    }
 };
 
-// Chat API
-export const chatApi = {
-  getRooms: async () => {
-    const { data, error } = await supabase
-      .from('chat_rooms')
-      .select('*, participants:chat_participants(*, user:profiles(*))');
-    
-    if (error) throw error;
-    return Array.isArray(data) ? data : [];
-  },
-
-  createRoom: async (participantIds: string[], name?: string) => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error('Not authenticated');
-
-    const { data: room, error: roomError } = await supabase
-      .from('chat_rooms')
-      .insert({
-        name,
-        is_group: participantIds.length > 1,
-        created_by: user.id,
-      })
-      .select()
-      .maybeSingle();
-
-    if (roomError) throw roomError;
-    if (!room) throw new Error('Failed to create room');
-
-    // Add participants
-    const participants = [user.id, ...participantIds].map(userId => ({
-      room_id: room.id,
-      user_id: userId,
-    }));
-
-    const { error: participantsError } = await supabase
-      .from('chat_participants')
-      .insert(participants);
-
-    if (participantsError) throw participantsError;
-
-    return room;
-  },
-
-  getMessages: async (roomId: string) => {
-    const { data, error } = await supabase
-      .from('chat_messages')
-      .select('*, user:profiles(*)')
-      .eq('room_id', roomId)
-      .order('created_at', { ascending: true });
-    
-    if (error) throw error;
-    return Array.isArray(data) ? data : [];
-  },
-
-  sendMessage: async (roomId: string, content: string) => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error('Not authenticated');
-
-    const { data, error } = await supabase
-      .from('chat_messages')
-      .insert({
-        room_id: roomId,
-        user_id: user.id,
-        content,
-      })
-      .select()
-      .maybeSingle();
-    
-    if (error) throw error;
-    return data;
-  },
-
-  subscribeToMessages: (roomId: string, callback: (message: unknown) => void) => {
-    return supabase
-      .channel(`room:${roomId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'chat_messages',
-          filter: `room_id=eq.${roomId}`,
-        },
-        callback
-      )
-      .subscribe();
-  },
-};
-
-// Notifications API
-export const notificationsApi = {
-  create: async (notification: {
-    user_id: string;
-    title: string;
-    message: string;
-    type: 'success' | 'error' | 'info' | 'warning';
-    action_type: string;
-    resource_type?: string;
-    resource_id?: string;
-  }) => {
-    const { data, error } = await supabase
-      .from('notifications')
-      .insert(notification)
-      .select()
-      .maybeSingle();
-    
-    if (error) throw error;
-    return data;
-  },
-
-  notifyAllAdmins: async (notification: {
-    title: string;
-    message: string;
-    type: 'success' | 'error' | 'info' | 'warning';
-    action_type: string;
-    resource_type?: string;
-    resource_id?: string;
-  }) => {
-    const { data: admins, error: adminError } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('role', 'admin');
-
-    if (adminError) throw adminError;
-
-    const notifications = admins.map(admin => ({
-      user_id: admin.id,
-      ...notification,
-    }));
-
-    const { error } = await supabase
-      .from('notifications')
-      .insert(notifications);
-
-    if (error) throw error;
-  },
-
-  getAll: async (userId: string) => {
-    const { data, error } = await supabase
-      .from('notifications')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(50);
-
-    if (error) throw error;
-    return Array.isArray(data) ? data : [];
-  },
-
-  markAsRead: async (notificationId: string) => {
-    const { error } = await supabase
-      .from('notifications')
-      .update({ is_read: true })
-      .eq('id', notificationId);
-
-    if (error) throw error;
-  },
-
-  markAllAsRead: async (userId: string) => {
-    const { error } = await supabase
-      .from('notifications')
-      .update({ is_read: true })
-      .eq('user_id', userId)
-      .eq('is_read', false);
-
-    if (error) throw error;
-  },
-
-  delete: async (notificationId: string) => {
-    const { error } = await supabase
-      .from('notifications')
-      .delete()
-      .eq('id', notificationId);
-
-    if (error) throw error;
-  },
-};
-
-// Blogs API
+// Blogs API (Placeholder - will use local storage for now since crm/v1/blogs doesn't exist)
 export const blogsApi = {
-  getAll: async () => {
-    const { data, error } = await supabase
-      .from('blogs')
-      .select('*, author:profiles(id, username)')
-      .order('created_at', { ascending: false });
-    
-    if (error) throw error;
-    return Array.isArray(data) ? data : [];
-  },
-
-  getPublished: async () => {
-    const { data, error } = await supabase
-      .from('blogs')
-      .select('*, author:profiles(id, username)')
-      .eq('status', 'published')
-      .order('published_at', { ascending: false });
-    
-    if (error) throw error;
-    return Array.isArray(data) ? data : [];
-  },
-
-  getById: async (id: string) => {
-    const { data, error } = await supabase
-      .from('blogs')
-      .select('*, author:profiles(id, username)')
-      .eq('id', id)
-      .maybeSingle();
-    
-    if (error) throw error;
-    return data;
-  },
-
-  create: async (blog: {
-    title: string;
-    description: string;
-    content?: string;
-    feature_image?: string;
-    category: string;
-    tags?: string[];
-    status?: string;
-  }) => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error('Not authenticated');
-
-    const { data, error } = await supabase
-      .from('blogs')
-      .insert({
-        ...blog,
-        author_id: user.id,
-        published_at: blog.status === 'published' ? new Date().toISOString() : null,
-      })
-      .select()
-      .maybeSingle();
-    
-    if (error) throw error;
-    return data;
-  },
-
-  update: async (id: string, updates: {
-    title?: string;
-    description?: string;
-    content?: string;
-    feature_image?: string;
-    category?: string;
-    tags?: string[];
-    status?: string;
-  }) => {
-    const updateData: Record<string, unknown> = { ...updates };
-    
-    // If publishing for the first time, set published_at
-    if (updates.status === 'published') {
-      const { data: blog } = await supabase
-        .from('blogs')
-        .select('published_at')
-        .eq('id', id)
-        .maybeSingle();
-      
-      if (blog && !blog.published_at) {
-        updateData.published_at = new Date().toISOString();
-      }
+    async getAll() {
+        return getLS('crm_blogs');
+    },
+    async getById(id: string) {
+        const items = getLS('crm_blogs');
+        return items.find((i: any) => i.id === id);
+    },
+    async create(data: any) {
+        const items = getLS('crm_blogs');
+        const newItem = {
+            id: genId(),
+            ...data,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            status: data.status || 'draft'
+        };
+        items.unshift(newItem);
+        setLS('crm_blogs', items);
+        return newItem;
+    },
+    async update(id: string, data: any) {
+        const items = getLS('crm_blogs');
+        const idx = items.findIndex((i: any) => i.id === id);
+        if (idx > -1) {
+            items[idx] = { ...items[idx], ...data, updated_at: new Date().toISOString() };
+            setLS('crm_blogs', items);
+            return items[idx];
+        }
+        return { id, ...data };
+    },
+    async delete(id: string) {
+        let items = getLS('crm_blogs');
+        items = items.filter((i: any) => i.id !== id);
+        setLS('crm_blogs', items);
+        return { success: true };
+    },
+    async uploadImage(file: File) {
+        return URL.createObjectURL(file);
+    },
+    async deleteImage(_url: string) {
+        return { success: true };
     }
-
-    const { data, error } = await supabase
-      .from('blogs')
-      .update(updateData)
-      .eq('id', id)
-      .select()
-      .maybeSingle();
-    
-    if (error) throw error;
-    return data;
-  },
-
-  delete: async (id: string) => {
-    const { error } = await supabase
-      .from('blogs')
-      .delete()
-      .eq('id', id);
-    
-    if (error) throw error;
-  },
-
-  uploadImage: async (file: File): Promise<string> => {
-    // Validate file
-    if (!file.type.startsWith('image/')) {
-      throw new Error('File must be an image');
-    }
-
-    // Check file size (1MB limit)
-    const maxSize = 1 * 1024 * 1024; // 1MB
-    let fileToUpload = file;
-
-    if (file.size > maxSize) {
-      // Compress image
-      fileToUpload = await compressImage(file);
-    }
-
-    // Generate unique filename
-    const fileExt = fileToUpload.name.split('.').pop();
-    const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
-    const filePath = `${fileName}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from('blog_images')
-      .upload(filePath, fileToUpload);
-
-    if (uploadError) throw uploadError;
-
-    const { data } = supabase.storage
-      .from('blog_images')
-      .getPublicUrl(filePath);
-
-    return data.publicUrl;
-  },
-
-  deleteImage: async (imageUrl: string) => {
-    const path = imageUrl.split('/blog_images/').pop();
-    if (!path) return;
-
-    const { error } = await supabase.storage
-      .from('blog_images')
-      .remove([path]);
-
-    if (error) throw error;
-  },
 };
 
-// Image compression helper
-async function compressImage(file: File): Promise<File> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target?.result as string;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let width = img.width;
-        let height = img.height;
-
-        // Resize to max 1080p
-        const maxDimension = 1080;
-        if (width > maxDimension || height > maxDimension) {
-          if (width > height) {
-            height = (height / width) * maxDimension;
-            width = maxDimension;
-          } else {
-            width = (width / height) * maxDimension;
-            height = maxDimension;
-          }
+// Pagination Helper Mock
+export const paginationHelper = {
+    async paginate(table: string, _params: any, _select: string = '*', _searchFields: string[] = []) {
+        if (table === 'leads') {
+            const data = await wpLeadsApi.getAll();
+            return {
+                data,
+                total: data.length,
+                page: 1,
+                pageSize: data.length
+            };
         }
+        return { data: getLS(`crm_${table}`), total: getLS(`crm_${table}`).length, page: 1, pageSize: 20 };
+    }
+};
 
-        canvas.width = width;
-        canvas.height = height;
-
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          reject(new Error('Failed to get canvas context'));
-          return;
-        }
-
-        ctx.drawImage(img, 0, 0, width, height);
-
-        canvas.toBlob(
-          (blob) => {
-            if (!blob) {
-              reject(new Error('Failed to compress image'));
-              return;
+// Bulk Operations
+export const bulkOperations = {
+    async bulkUpdate(table: string, ids: string[], updates: any) {
+        if (table === 'leads') {
+            for (const id of ids) {
+                await wpLeadsApi.update(id, updates);
             }
-            const compressedFile = new File([blob], file.name, {
-              type: 'image/webp',
-              lastModified: Date.now(),
-            });
-            resolve(compressedFile);
-          },
-          'image/webp',
-          0.8
-        );
-      };
-      img.onerror = () => reject(new Error('Failed to load image'));
-    };
-    reader.onerror = () => reject(new Error('Failed to read file'));
-  });
-}
+        } else {
+            const dbKey = `crm_${table}`;
+            const items = getLS(dbKey);
+            for (const id of ids) {
+                const idx = items.findIndex((i: any) => i.id === id);
+                if (idx > -1) items[idx] = { ...items[idx], ...updates };
+            }
+            setLS(dbKey, items);
+        }
+        return { success: true };
+    },
+    async bulkDelete(table: string, ids: string[]) {
+        if (table === 'leads') {
+            for (const id of ids) {
+                await wpLeadsApi.delete(id);
+            }
+        } else {
+            const dbKey = `crm_${table}`;
+            let items = getLS(dbKey);
+            items = items.filter((i: any) => !ids.includes(i.id));
+            setLS(dbKey, items);
+        }
+        return { success: true };
+    }
+};
+
+// Chat API Mock (Using LocalStorage)
+export const chatApi = {
+    async getRooms() { return getLS('crm_chat_rooms'); },
+    async getMessages(roomId: string) {
+        const msgs = getLS('crm_chat_msgs');
+        return msgs.filter((m: any) => m.roomId === roomId);
+    },
+    async sendMessage(roomId: string, content: string) {
+        const msgs = getLS('crm_chat_msgs');
+        const newMsg = { id: genId(), roomId, content, created_at: new Date().toISOString() };
+        msgs.push(newMsg);
+        setLS('crm_chat_msgs', msgs);
+        return newMsg;
+    },
+    async createRoom(users: string[]) {
+        const rooms = getLS('crm_chat_rooms');
+        const newRoom = { id: genId(), users, created_at: new Date().toISOString() };
+        rooms.push(newRoom);
+        setLS('crm_chat_rooms', rooms);
+        return newRoom;
+    },
+    subscribeToMessages(_roomId: string, _callback: () => void) {
+        return { unsubscribe: () => { } };
+    }
+};
+
+// Notifications API Mock
+export const notificationsApi = {
+    async getAll() {
+        return getLS('crm_notifications');
+    },
+    async create(data: any) {
+        const items = getLS('crm_notifications');
+        const newItem = { id: genId(), ...data, created_at: new Date().toISOString(), is_read: false };
+        items.unshift(newItem);
+        setLS('crm_notifications', items);
+        return newItem;
+    },
+    async markAsRead(id: string) {
+        const items = getLS('crm_notifications');
+        const idx = items.findIndex((i: any) => i.id === id);
+        if (idx > -1) {
+            items[idx].is_read = true;
+            setLS('crm_notifications', items);
+        }
+        return { success: true };
+    },
+    async notifyAllAdmins(data: any) {
+        return this.create({ ...data, role_target: 'admin' });
+    }
+};

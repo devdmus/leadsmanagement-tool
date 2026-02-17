@@ -1,28 +1,8 @@
 import { useEffect, useState } from 'react';
-import { activityLogsApi, profilesApi } from '@/db/api';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/AuthContext';
-type UserRole = 'admin' | 'sales' | 'seo' | 'client';
-
-type Profile = {
-  id: string;
-  username: string;
-  email: string | null;
-  role: UserRole;
-  is_client_paid: boolean;
-  created_at: string;
-  updated_at: string;
-};
-
-type ActivityLog = {
-  id: string;
-  user_id: string;
-  action: string;
-  resource_type: string;
-  resource_id: string | null;
-  details: Record<string, unknown> | null;
-  created_at: string;
-};
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { activityLogsApi, profilesApi } from '@/db/api';
 import {
   Table,
   TableBody,
@@ -31,141 +11,159 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useToast } from '@/hooks/use-toast';
+import { format } from 'date-fns';
+
+type ActivityLog = {
+  id: string;
+  user_id: string;
+  action: string;
+  resource_type: string;
+  resource_id: string | null;
+  details: Record<string, any> | null;
+  created_at: string;
+  user?: { username: string };
+};
 
 export default function ActivityPage() {
-  const [logs, setLogs] = useState<ActivityLog[]>([]);
-  const [users, setUsers] = useState<Record<string, Profile>>({});
-  const [loading, setLoading] = useState(true);
   const { hasPermission } = useAuth();
-  const { toast } = useToast();
+  const [logs, setLogs] = useState<ActivityLog[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const loadData = async () => {
+      try {
+        const [logsData, profilesData] = await Promise.all([
+          activityLogsApi.getAll(),
+          profilesApi.getAll()
+        ]);
+
+        // Map user details to logs
+        const mappedLogs = logsData.map((log: any) => ({
+          ...log,
+          user: profilesData.find((p: any) => p.id === log.user_id)
+        }));
+
+        setLogs(mappedLogs);
+      } catch (error) {
+        console.error('Failed to load activity logs:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
     if (hasPermission('activity_logs', 'read')) {
       loadData();
     }
-  }, []);
-
-  const loadData = async () => {
-    try {
-      const [logsData, usersData] = await Promise.all([
-        activityLogsApi.getAll(100),
-        profilesApi.getAll(),
-      ]);
-
-      setLogs(logsData);
-
-      const usersMap: Record<string, Profile> = {};
-      for (const user of usersData) {
-        usersMap[user.id] = user;
-      }
-      setUsers(usersMap);
-    } catch (error) {
-      console.error('Failed to load activity logs:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to load activity logs',
-        variant: 'destructive',
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const getActionBadge = (action: string) => {
-    if (action.includes('create')) {
-      return <Badge className="bg-success text-white">Create</Badge>;
-    }
-    if (action.includes('update')) {
-      return <Badge className="bg-info text-white">Update</Badge>;
-    }
-    if (action.includes('delete')) {
-      return <Badge className="bg-destructive text-destructive-foreground">Delete</Badge>;
-    }
-    return <Badge variant="outline">{action}</Badge>;
-  };
+  }, [hasPermission]);
 
   if (!hasPermission('activity_logs', 'read')) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[400px]">
-        <p className="text-muted-foreground">You do not have permission to access this page</p>
+        <p className="text-muted-foreground">
+          You do not have permission to access this page
+        </p>
       </div>
     );
   }
 
-  if (loading) {
+  const getActionBadge = (action: string) => {
+    const map: Record<string, string> = {
+      create_lead: 'bg-green-500',
+      update_lead: 'bg-blue-500',
+      delete_lead: 'bg-red-500',
+      lead_assigned: 'bg-indigo-500',
+      status_change: 'bg-yellow-500',
+      create_note: 'bg-emerald-500',
+      update_note: 'bg-teal-500',
+      delete_note: 'bg-orange-500',
+      create_follow_up: 'bg-purple-500',
+      update_follow_up: 'bg-pink-500',
+      delete_follow_up: 'bg-rose-500',
+      create_seo_tag: 'bg-violet-500',
+      update_seo_tag: 'bg-fuchsia-500',
+      delete_seo_tag: 'bg-rose-500',
+      bulk_delete_seo_tags: 'bg-red-600',
+      bulk_assign_seo_tags: 'bg-indigo-600',
+    };
+
+    // Fallback or default styling
+    const colorClass = map[action] || 'bg-slate-500';
+
     return (
-      <div className="space-y-6">
-        <Skeleton className="h-10 w-48 bg-muted" />
-        <Card>
-          <CardHeader>
-            <Skeleton className="h-6 w-32 bg-muted" />
-          </CardHeader>
-          <CardContent>
-            <Skeleton className="h-64 w-full bg-muted" />
-          </CardContent>
-        </Card>
+      <Badge className={`${colorClass} text-white hover:${colorClass}`}>
+        {action.replace(/_/g, ' ').toUpperCase()}
+      </Badge>
+    );
+  };
+
+  const renderDetails = (details: Record<string, any> | null) => {
+    if (!details) return '-';
+    return (
+      <div className="text-xs text-muted-foreground max-w-[300px] truncate">
+        {Object.entries(details).map(([key, value]) => (
+          <span key={key} className="mr-2">
+            <span className="font-semibold">{key}:</span> {String(value)}
+          </span>
+        ))}
       </div>
     );
-  }
+  };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-6 animate-fade-in">
       <div>
         <h1 className="text-3xl font-bold">Activity Logs</h1>
-        <p className="text-muted-foreground">View all system activities and changes</p>
+        <p className="text-muted-foreground">
+          System activity tracking
+        </p>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Recent Activities</CardTitle>
-          <CardDescription>Last 100 activities across the system</CardDescription>
+          <CardTitle>Recent Activity</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>User</TableHead>
-                <TableHead>Action</TableHead>
-                <TableHead>Resource Type</TableHead>
-                <TableHead>Details</TableHead>
-                <TableHead>Timestamp</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {logs.length === 0 ? (
+          {loading ? (
+            <div className="space-y-4">
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-12 w-full" />
+            </div>
+          ) : logs.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              No activity recorded yet.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground">
-                    No activity logs found
-                  </TableCell>
+                  <TableHead>Time</TableHead>
+                  <TableHead>User</TableHead>
+                  <TableHead>Action</TableHead>
+                  <TableHead>Details</TableHead>
                 </TableRow>
-              ) : (
-                logs.map((log) => (
+              </TableHeader>
+              <TableBody>
+                {logs.map((log) => (
                   <TableRow key={log.id}>
+                    <TableCell className="whitespace-nowrap">
+                      {log.created_at ? format(new Date(log.created_at), 'MMM d, h:mm a') : '-'}
+                    </TableCell>
                     <TableCell className="font-medium">
-                      {users[log.user_id]?.username || 'Unknown'}
-                    </TableCell>
-                    <TableCell>{getActionBadge(log.action)}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline">
-                        {log.resource_type.split('_').map(word => 
-                          word.charAt(0).toUpperCase() + word.slice(1)
-                        ).join(' ')}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="max-w-xs truncate">
-                      {log.details ? JSON.stringify(log.details) : '-'}
+                      {log.user?.username || 'Unknown'}
                     </TableCell>
                     <TableCell>
-                      {new Date(log.created_at).toLocaleString()}
+                      {getActionBadge(log.action)}
+                    </TableCell>
+                    <TableCell>
+                      {renderDetails(log.details)}
                     </TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
     </div>
