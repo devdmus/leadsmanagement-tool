@@ -2,13 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { AlertTriangle, Shield, RefreshCw } from 'lucide-react';
-
-interface IPSessionData {
-    ip: string;
-    userId: string;
-    loginTime: string;
-}
+import { Shield, RefreshCw } from 'lucide-react';
 
 interface WhitelistedIP {
     id: string;
@@ -21,13 +15,14 @@ interface WhitelistedIP {
 }
 
 const IP_WHITELIST_KEY = 'crm_ip_whitelist';
+const ALLOWED_PRIMARY_IP = '183.82.116.22';
 
 export function IPSecurityGuard({ children }: { children: React.ReactNode }) {
     const { profile, signOut } = useAuth();
     const [isValidating, setIsValidating] = useState(true);
-    const [ipMismatch, setIpMismatch] = useState(false);
+    const [accessRestricted, setAccessRestricted] = useState(false);
     const [currentIP, setCurrentIP] = useState<string | null>(null);
-    const [loginIP, setLoginIP] = useState<string | null>(null);
+    const [requestSent, setRequestSent] = useState(false);
 
     useEffect(() => {
         const validateSession = async () => {
@@ -37,28 +32,11 @@ export function IPSecurityGuard({ children }: { children: React.ReactNode }) {
             }
 
             try {
-                // Get stored session IP
-                const storedData = localStorage.getItem('crm_session_ip');
-                if (!storedData) {
-                    // No IP stored, allow access (legacy session)
-                    setIsValidating(false);
-                    return;
-                }
-
-                const sessionData: IPSessionData = JSON.parse(storedData);
-                setLoginIP(sessionData.ip);
-
-                // Check if session belongs to current user
-                if (sessionData.userId !== profile.id) {
-                    // Different user, allow new session
-                    setIsValidating(false);
-                    return;
-                }
-
                 // Get current IP
                 const response = await fetch('https://api.ipify.org?format=json');
                 if (!response.ok) {
-                    // Can't verify, allow access
+                    // If we can't get IP, we must block for safety in this strict mode
+                    setAccessRestricted(true);
                     setIsValidating(false);
                     return;
                 }
@@ -66,13 +44,13 @@ export function IPSecurityGuard({ children }: { children: React.ReactNode }) {
                 const ipData = await response.json();
                 setCurrentIP(ipData.ip);
 
-                // If IP matches login IP, allow
-                if (sessionData.ip === ipData.ip) {
+                // 1. Check if it's the primary allowed IP
+                if (ipData.ip === ALLOWED_PRIMARY_IP) {
                     setIsValidating(false);
                     return;
                 }
 
-                // Check if current IP is in whitelist for this user
+                // 2. Check if IP is in whitelist for this user
                 const whitelistData = localStorage.getItem(IP_WHITELIST_KEY);
                 if (whitelistData) {
                     const whitelist: WhitelistedIP[] = JSON.parse(whitelistData);
@@ -81,39 +59,19 @@ export function IPSecurityGuard({ children }: { children: React.ReactNode }) {
                     );
 
                     if (isWhitelisted) {
-                        // IP is whitelisted, update session and allow
-                        const newSessionData = {
-                            ip: ipData.ip,
-                            userId: profile.id,
-                            loginTime: new Date().toISOString(),
-                        };
-                        localStorage.setItem('crm_session_ip', JSON.stringify(newSessionData));
-
-                        // Log the whitelisted access
-                        const logs = JSON.parse(localStorage.getItem('crm_ip_logs') || '[]');
-                        logs.unshift({
-                            action: 'whitelisted_access',
-                            ip: ipData.ip,
-                            userId: profile.id,
-                            username: profile.username,
-                            timestamp: new Date().toISOString(),
-                        });
-                        localStorage.setItem('crm_ip_logs', JSON.stringify(logs.slice(0, 100)));
-
                         setIsValidating(false);
                         return;
                     }
                 }
 
-                // IP mismatch and not whitelisted
-                setIpMismatch(true);
+                // If we reach here, the IP is NOT authorized
+                setAccessRestricted(true);
 
-                // Log the suspicious activity
+                // Log the unauthorized access attempt
                 const logs = JSON.parse(localStorage.getItem('crm_ip_logs') || '[]');
                 logs.unshift({
-                    action: 'ip_mismatch',
-                    loginIP: sessionData.ip,
-                    currentIP: ipData.ip,
+                    action: 'unauthorized_attempt',
+                    ip: ipData.ip,
                     userId: profile.id,
                     username: profile.username,
                     timestamp: new Date().toISOString(),
@@ -121,6 +79,7 @@ export function IPSecurityGuard({ children }: { children: React.ReactNode }) {
                 localStorage.setItem('crm_ip_logs', JSON.stringify(logs.slice(0, 100)));
             } catch (error) {
                 console.warn('IP validation error:', error);
+                setAccessRestricted(true);
             }
 
             setIsValidating(false);
@@ -135,71 +94,22 @@ export function IPSecurityGuard({ children }: { children: React.ReactNode }) {
         window.location.href = '/login';
     };
 
-    const handleContinue = () => {
-        // Update the session IP to current IP (user confirmed it's them)
-        if (currentIP && profile) {
-            const sessionData = {
-                ip: currentIP,
-                userId: profile.id,
-                loginTime: new Date().toISOString(),
-            };
-            localStorage.setItem('crm_session_ip', JSON.stringify(sessionData));
-
-            // Log the IP update
-            const logs = JSON.parse(localStorage.getItem('crm_ip_logs') || '[]');
-            logs.unshift({
-                action: 'ip_updated',
-                oldIP: loginIP,
-                newIP: currentIP,
-                userId: profile.id,
-                username: profile.username,
-                timestamp: new Date().toISOString(),
-            });
-            localStorage.setItem('crm_ip_logs', JSON.stringify(logs.slice(0, 100)));
-        }
-        setIpMismatch(false);
-    };
-
-    const handleAddToWhitelist = () => {
+    const handleRequestPermission = () => {
         if (!currentIP || !profile) return;
 
-        // Add current IP to whitelist
-        const whitelistData = localStorage.getItem(IP_WHITELIST_KEY);
-        const whitelist: WhitelistedIP[] = whitelistData ? JSON.parse(whitelistData) : [];
-
-        const newEntry: WhitelistedIP = {
-            id: Math.random().toString(36).substr(2, 9),
-            ip: currentIP,
-            userId: String(profile.id),
-            username: String(profile.username),
-            label: 'Self-Added',
-            addedBy: String(profile.username),
-            addedAt: new Date().toISOString(),
-        };
-
-        whitelist.push(newEntry);
-        localStorage.setItem(IP_WHITELIST_KEY, JSON.stringify(whitelist));
-
-        // Update session
-        const sessionData = {
-            ip: currentIP,
-            userId: profile.id,
-            loginTime: new Date().toISOString(),
-        };
-        localStorage.setItem('crm_session_ip', JSON.stringify(sessionData));
-
-        // Log
+        // Log the permission request
         const logs = JSON.parse(localStorage.getItem('crm_ip_logs') || '[]');
         logs.unshift({
-            action: 'ip_self_whitelisted',
+            action: 'permission_requested',
             ip: currentIP,
             userId: profile.id,
             username: profile.username,
             timestamp: new Date().toISOString(),
+            status: 'pending'
         });
         localStorage.setItem('crm_ip_logs', JSON.stringify(logs.slice(0, 100)));
 
-        setIpMismatch(false);
+        setRequestSent(true);
     };
 
     if (isValidating) {
@@ -213,61 +123,69 @@ export function IPSecurityGuard({ children }: { children: React.ReactNode }) {
         );
     }
 
-    if (ipMismatch) {
+    if (accessRestricted) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-background p-4">
-                <Card className="max-w-md w-full border-destructive">
+                <Card className="max-w-md w-full border-destructive shadow-2xl">
                     <CardHeader className="text-center">
                         <div className="mx-auto mb-4 p-3 bg-destructive/10 rounded-full w-fit">
-                            <AlertTriangle className="h-8 w-8 text-destructive" />
+                            <Shield className="h-8 w-8 text-destructive" />
                         </div>
-                        <CardTitle className="text-destructive">Security Alert</CardTitle>
+                        <CardTitle className="text-destructive text-2xl">Restricted Access</CardTitle>
                         <CardDescription>
-                            Your IP address has changed since login
+                            Your current IP address is not authorized to access this system.
                         </CardDescription>
                     </CardHeader>
-                    <CardContent className="space-y-4">
+                    <CardContent className="space-y-6">
                         <div className="bg-muted p-4 rounded-lg space-y-2 text-sm">
-                            <div className="flex justify-between">
-                                <span className="text-muted-foreground">Login IP:</span>
-                                <span className="font-mono">{loginIP}</span>
+                            <div className="flex justify-between items-center">
+                                <span className="text-muted-foreground">Your IP:</span>
+                                <span className="font-mono font-bold text-destructive">{currentIP || 'Unknown'}</span>
                             </div>
-                            <div className="flex justify-between">
-                                <span className="text-muted-foreground">Current IP:</span>
-                                <span className="font-mono text-destructive">{currentIP}</span>
+                            <div className="text-[10px] text-muted-foreground uppercase tracking-widest text-center pt-2">
+                                Security Protocol Active
                             </div>
                         </div>
 
-                        <p className="text-sm text-muted-foreground text-center">
-                            For your security, please confirm this is you or log in again.
-                        </p>
+                        {requestSent ? (
+                            <div className="bg-success/10 border border-success/20 p-4 rounded-lg text-center">
+                                <p className="text-success font-medium text-sm">
+                                    Permission request sent!
+                                </p>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                    An administrator will review your access request shortly.
+                                </p>
+                            </div>
+                        ) : (
+                            <p className="text-sm text-muted-foreground text-center">
+                                Only authorized locations can access the CRM. If this is a mistake, please request permission.
+                            </p>
+                        )}
 
-                        <div className="flex flex-col gap-2">
-                            <div className="flex gap-2">
+                        <div className="flex flex-col gap-3">
+                            {!requestSent && (
                                 <Button
-                                    variant="outline"
-                                    className="flex-1"
-                                    onClick={handleContinue}
+                                    variant="default"
+                                    className="w-full h-11 bg-primary hover:bg-primary/90 transition-all shadow-md"
+                                    onClick={handleRequestPermission}
                                 >
                                     <Shield className="mr-2 h-4 w-4" />
-                                    Continue Once
+                                    Request Permission
                                 </Button>
-                                <Button
-                                    variant="destructive"
-                                    className="flex-1"
-                                    onClick={handleLogout}
-                                >
-                                    Log Out
-                                </Button>
-                            </div>
+                            )}
                             <Button
-                                variant="default"
-                                className="w-full"
-                                onClick={handleAddToWhitelist}
+                                variant="outline"
+                                className="w-full h-11 border-destructive/20 hover:bg-destructive/5 text-destructive"
+                                onClick={handleLogout}
                             >
-                                <Shield className="mr-2 h-4 w-4" />
-                                Trust This IP (Add to Whitelist)
+                                Log Out
                             </Button>
+                        </div>
+
+                        <div className="text-center">
+                            <p className="text-[10px] text-muted-foreground italic">
+                                Support ID: {profile?.id?.substring(0, 8) || 'anonymous'}
+                            </p>
                         </div>
                     </CardContent>
                 </Card>

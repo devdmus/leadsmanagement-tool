@@ -91,13 +91,30 @@ export const profilesApi = {
 // Activity Logs API
 export const activityLogsApi = {
     async getAll() {
+        // Fallback to local storage for view if needed, but ActivityPage now uses wordpressApi directly
         return getLS('crm_activity_logs');
     },
     async create(data: any) {
+        // Log locally first (fallback)
         const logs = getLS('crm_activity_logs');
         const newLog = { id: genId(), ...data, created_at: new Date().toISOString() };
         logs.unshift(newLog);
         setLS('crm_activity_logs', logs);
+
+        // Then attempt server-side logging
+        try {
+            const saved = localStorage.getItem('wp_credentials');
+            if (saved) {
+                const creds = JSON.parse(saved);
+                const authHeader = 'Basic ' + btoa(`${creds.username}:${creds.password}`);
+
+                const { wordpressApi } = await import('./wordpressApi');
+                await wordpressApi.logActivity(data.action, JSON.stringify(data.details || {}), { Authorization: authHeader });
+            }
+        } catch (e) {
+            console.warn('Failed to log activity to server:', e);
+        }
+
         return newLog;
     }
 };

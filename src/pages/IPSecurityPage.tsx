@@ -42,7 +42,7 @@ import {
 } from '@/components/ui/select';
 import { Plus, Trash2, Shield, Globe, History } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { profilesApi } from '@/db/api';
+import { profilesApi, activityLogsApi } from '@/db/api';
 
 interface WhitelistedIP {
     id: string;
@@ -161,6 +161,15 @@ export default function IPSecurityPage() {
 
         saveWhitelist([...whitelist, newEntry]);
 
+        // Server-side logging
+        if (profile) {
+            activityLogsApi.create({
+                user_id: profile.id as string,
+                action: 'ip_whitelist_add',
+                details: { ip: formData.ip, for_user: selectedUser?.username }
+            });
+        }
+
         toast({
             title: 'IP Added',
             description: `${formData.ip} is now whitelisted for ${selectedUser?.username}`,
@@ -171,8 +180,18 @@ export default function IPSecurityPage() {
     };
 
     const handleRemoveIP = (id: string) => {
+        const removedEntry = whitelist.find(w => w.id === id);
         const updated = whitelist.filter(w => w.id !== id);
         saveWhitelist(updated);
+
+        // Server-side logging
+        if (profile && removedEntry) {
+            activityLogsApi.create({
+                user_id: profile.id as string,
+                action: 'ip_whitelist_remove',
+                details: { ip: removedEntry.ip, for_user: removedEntry.username }
+            });
+        }
         toast({
             title: 'IP Removed',
             description: 'The IP address has been removed from whitelist',
@@ -432,21 +451,48 @@ export default function IPSecurityPage() {
                             {logs.slice(0, 50).map((log, index) => (
                                 <div
                                     key={index}
-                                    className={`p-3 rounded-lg border text-sm ${log.action === 'ip_mismatch'
+                                    className={`p-3 rounded-lg border text-sm ${log.action === 'ip_mismatch' || log.action === 'unauthorized_attempt'
                                         ? 'border-destructive/50 bg-destructive/5'
-                                        : 'border-border bg-muted/30'
+                                        : log.action === 'permission_requested'
+                                            ? 'border-warning/50 bg-warning/5'
+                                            : 'border-border bg-muted/30'
                                         }`}
                                 >
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-2">
-                                            <Badge variant={log.action === 'ip_mismatch' ? 'destructive' : 'secondary'}>
-                                                {log.action}
+                                            <Badge variant={
+                                                log.action === 'ip_mismatch' || log.action === 'unauthorized_attempt'
+                                                    ? 'destructive'
+                                                    : log.action === 'permission_requested'
+                                                        ? 'outline'
+                                                        : 'secondary'
+                                            }>
+                                                {log.action.replace('_', ' ')}
                                             </Badge>
                                             <span className="font-medium">{log.username || log.userId}</span>
                                         </div>
-                                        <span className="text-muted-foreground text-xs">
-                                            {new Date(log.timestamp).toLocaleString()}
-                                        </span>
+                                        <div className="flex items-center gap-3">
+                                            <span className="text-muted-foreground text-xs">
+                                                {new Date(log.timestamp).toLocaleString()}
+                                            </span>
+                                            {log.action === 'permission_requested' && (
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    className="h-7 text-[10px]"
+                                                    onClick={() => {
+                                                        setFormData({
+                                                            ip: log.ip || '',
+                                                            userId: log.userId,
+                                                            label: `Requested by ${log.username}`
+                                                        });
+                                                        setIsAddDialogOpen(true);
+                                                    }}
+                                                >
+                                                    Approve
+                                                </Button>
+                                            )}
+                                        </div>
                                     </div>
                                     <div className="mt-1 text-muted-foreground font-mono text-xs">
                                         {log.ip && `IP: ${log.ip}`}
