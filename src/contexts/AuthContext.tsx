@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
-import type { Profile, UserRole } from '@/types/types';
+import { Profile, UserRole } from '../types/types';
 
 
 
@@ -21,6 +21,7 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   getWpAuthHeader: () => string;
+  logActivity: (action: string, details: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -60,6 +61,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // 🔐 Static permission map
   const permissions: Record<UserRole, Record<string, Permission>> = {
+    super_admin: {
+      leads: { can_read: true, can_write: true },
+      users: { can_read: true, can_write: true },
+      activity_logs: { can_read: true, can_write: true },
+      subscriptions: { can_read: true, can_write: true },
+      seo_meta_tags: { can_read: true, can_write: true },
+      blogs: { can_read: true, can_write: true },
+    },
     admin: {
       leads: { can_read: true, can_write: true },
       users: { can_read: true, can_write: true },
@@ -70,15 +79,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     sales_manager: {
       leads: { can_read: true, can_write: true },
-      users: { can_read: false, can_write: false }, // Maybe allow viewing users?
-      activity_logs: { can_read: false, can_write: false }, // Manager sees logs
+      users: { can_read: true, can_write: false },
+      activity_logs: { can_read: false, can_write: false },
       subscriptions: { can_read: false, can_write: false },
       seo_meta_tags: { can_read: false, can_write: false },
       blogs: { can_read: false, can_write: false },
     },
     sales_person: {
-      leads: { can_read: true, can_write: true }, // Can read/write (notes etc) - scoped in UI
-      users: { can_read: false, can_write: false },
+      leads: { can_read: true, can_write: true },
+      users: { can_read: true, can_write: false },
       activity_logs: { can_read: false, can_write: false },
       subscriptions: { can_read: false, can_write: false },
       seo_meta_tags: { can_read: false, can_write: false },
@@ -86,7 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     seo_manager: {
       leads: { can_read: false, can_write: false },
-      users: { can_read: false, can_write: false },
+      users: { can_read: true, can_write: false },
       activity_logs: { can_read: false, can_write: false },
       subscriptions: { can_read: false, can_write: false },
       seo_meta_tags: { can_read: true, can_write: true },
@@ -94,10 +103,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     seo_person: {
       leads: { can_read: false, can_write: false },
-      users: { can_read: false, can_write: false },
+      users: { can_read: true, can_write: false },
       activity_logs: { can_read: false, can_write: false },
       subscriptions: { can_read: false, can_write: false },
-      seo_meta_tags: { can_read: true, can_write: true }, // Scoped in UI
+      seo_meta_tags: { can_read: true, can_write: true },
       blogs: { can_read: true, can_write: true },
     },
     client: {
@@ -170,32 +179,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Capture and save IP address for session security
       try {
         const ipResponse = await fetch('https://api.ipify.org?format=json');
+        let ip = 'unknown';
         if (ipResponse.ok) {
           const ipData = await ipResponse.json();
+          ip = ipData.ip;
           const sessionData = {
             ip: ipData.ip,
             userId: newProfile.id,
             loginTime: new Date().toISOString(),
           };
           localStorage.setItem('crm_session_ip', JSON.stringify(sessionData));
-
-          // Log the login activity
-          const logs = JSON.parse(localStorage.getItem('crm_ip_logs') || '[]');
-          logs.unshift({
-            action: 'login',
-            ip: ipData.ip,
-            userId: newProfile.id,
-            username: newProfile.username,
-            timestamp: new Date().toISOString(),
-          });
-          localStorage.setItem('crm_ip_logs', JSON.stringify(logs.slice(0, 100)));
         }
+
+        // Log the login activity server-side with explicit credentials
+        const { wordpressApi } = await import('../db/wordpressApi');
+        const authHeader = 'Basic ' + btoa(`${username}:${password}`);
+        await wordpressApi.logActivity(
+          'login',
+          `User ${newProfile.username} logged in from IP ${ip}`,
+          { Authorization: authHeader }
+        );
+
+        // Legacy local logging (keeping for fallback/compatibility)
+        const logs = JSON.parse(localStorage.getItem('crm_ip_logs') || '[]');
+        logs.unshift({
+          action: 'login',
+          ip: ip,
+          userId: newProfile.id,
+          username: newProfile.username,
+          timestamp: new Date().toISOString(),
+        });
+        localStorage.setItem('crm_ip_logs', JSON.stringify(logs.slice(0, 100)));
       } catch (ipError) {
-        console.warn('Could not capture IP address:', ipError);
+        console.warn('Could not capture IP address or log activity:', ipError);
       }
 
       setProfile(newProfile);
       setWpCredentials({ username, password });
+      localStorage.setItem('wp_credentials', JSON.stringify({ username, password }));
 
       return { error: null };
     } catch (err: any) {
@@ -210,16 +231,56 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signUpWithUsername = async () => ({ error: new Error("Signup must be done via WordPress Admin") });
 
   const signOut = async () => {
+    // Log logout BEFORE clearing credentials
+    if (profile && wpCredentials) {
+      try {
+        const { wordpressApi } = await import('../db/wordpressApi');
+        const authHeader = 'Basic ' + btoa(`${wpCredentials.username}:${wpCredentials.password}`);
+        await wordpressApi.logActivity(
+          'logout',
+          `User ${profile.username} logged out`,
+          { Authorization: authHeader }
+        );
+      } catch (e) {
+        console.warn('Failed to log logout:', e);
+      }
+    }
+
     setProfile(null);
     setWpCredentials(null);
-    localStorage.removeItem('crm_profile');
     localStorage.removeItem('wp_credentials');
-    localStorage.removeItem('crm_session_ip'); // Clear IP session
+    localStorage.removeItem('crm_session_ip');
+    localStorage.removeItem('crm_profile');
   };
 
   const refreshProfile = async () => {
     if (wpCredentials) {
       await signInWithUsername(wpCredentials.username, wpCredentials.password);
+    }
+  };
+
+  const logActivity = async (action: string, details: string) => {
+    try {
+      const { wordpressApi } = await import('../db/wordpressApi');
+      // Use state credentials if available, otherwise fallback to localStorage
+      let authHeaderValue = '';
+      if (wpCredentials) {
+        authHeaderValue = 'Basic ' + btoa(`${wpCredentials.username}:${wpCredentials.password}`);
+      } else {
+        const saved = localStorage.getItem('wp_credentials');
+        if (saved) {
+          const creds = JSON.parse(saved);
+          authHeaderValue = 'Basic ' + btoa(`${creds.username}:${creds.password}`);
+        }
+      }
+
+      await wordpressApi.logActivity(
+        action,
+        details,
+        authHeaderValue ? { Authorization: authHeaderValue } : undefined
+      );
+    } catch (error) {
+      console.error('Error logging activity:', error);
     }
   };
 
@@ -235,7 +296,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signUpWithUsername,
         signOut,
         refreshProfile,
-        getWpAuthHeader
+        getWpAuthHeader,
+        logActivity
       }}
     >
       {children}

@@ -344,19 +344,17 @@ export const wordpressApi = {
   /**
    * Get all users
    */
-  async getUsers(role?: string) {
-    let url = `${WP_BASE_URL}/users?per_page=100`;
+  async getUsers(role?: string, customHeaders?: Record<string, string>) {
+    let url = `${WP_BASE_URL}/users?per_page=100&context=edit`;
     if (role) {
       url += `&roles=${role}`;
     }
 
     const res = await fetch(url, {
-      headers: AUTH_HEADER,
+      headers: customHeaders || AUTH_HEADER,
     });
 
     if (!res.ok) {
-      // If 401/403, might be permissions. Return empty list or throw depending on strictness.
-      // For now, let's throw to be visible.
       throw new Error('Failed to fetch users');
     }
     return res.json();
@@ -419,6 +417,39 @@ export const wordpressApi = {
     if (!res.ok) {
       const error = await res.json();
       throw new Error(error.message || 'Failed to delete user');
+    }
+    return res.json();
+  },
+
+  /**
+   * Log an activity to the custom table
+   */
+  async logActivity(action: string, details: string, customHeaders?: Record<string, string>) {
+    const res = await fetch('https://digitmarketus.com/Bhairavi/wp-json/crm/v1/log', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(customHeaders || AUTH_HEADER),
+      },
+      body: JSON.stringify({ action, details }),
+    });
+
+    if (!res.ok) {
+      console.warn('Failed to log activity:', await res.text());
+    }
+  },
+
+  /**
+   * Fetch activity logs (Admin only)
+   */
+  async getActivityLogs(page: number = 1, customHeaders?: Record<string, string>) {
+    const res = await fetch(`https://digitmarketus.com/Bhairavi/wp-json/crm/v1/logs?page=${page}`, {
+      headers: customHeaders || AUTH_HEADER,
+    });
+
+    if (!res.ok) {
+      if (res.status === 403) throw new Error('You do not have permission to view logs');
+      throw new Error('Failed to fetch activity logs');
     }
     return res.json();
   },
