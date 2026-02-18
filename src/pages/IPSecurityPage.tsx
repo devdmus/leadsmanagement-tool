@@ -231,7 +231,7 @@ export default function IPSecurityPage() {
     };
 
     // Check if current user can access this page
-    if (!profile || (profile.role !== 'admin' && profile.role !== 'super_admin')) {
+    if (!profile || profile.role !== 'admin') {
         return (
             <div className="flex items-center justify-center min-h-[400px]">
                 <p className="text-muted-foreground">You don't have permission to access this page.</p>

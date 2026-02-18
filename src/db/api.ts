@@ -44,14 +44,48 @@ export const seoMetaTagsApi = {
 export const profilesApi = {
     async getAll() {
         try {
-            const saved = localStorage.getItem('wp_credentials');
-            if (saved) {
-                const creds = JSON.parse(saved);
-                const auth = 'Basic ' + btoa(`${creds.username}:${creds.password}`);
+            // Default setup
+            let apiBaseUrl = 'https://digitmarketus.com/Bhairavi/wp-json/wp/v2';
+            let auth = '';
 
-                const res = await fetch('https://digitmarketus.com/Bhairavi/wp-json/wp/v2/users?context=view', {
+            // Check for current site
+            const currentSiteId = localStorage.getItem('crm_current_site_id');
+            const savedSites = localStorage.getItem('crm_wp_sites');
+
+            if (currentSiteId && savedSites) {
+                const sites = JSON.parse(savedSites);
+                const site = sites.find((s: any) => s.id === currentSiteId);
+
+                if (site) {
+                    // Update URL
+                    if (site.url) {
+                        let url = site.url.replace(/\/$/, '');
+                        if (!url.includes('/wp-json')) url += '/wp-json';
+                        apiBaseUrl = url + '/wp/v2';
+                    }
+
+                    // Check for site-specific credentials
+                    if (site.username && site.appPassword) {
+                        auth = 'Basic ' + btoa(`${site.username}:${site.appPassword}`);
+                    }
+                }
+            }
+
+            // Fallback to global credentials if no site-specific auth found
+            if (!auth) {
+                const saved = localStorage.getItem('wp_credentials');
+                if (saved) {
+                    const creds = JSON.parse(saved);
+                    auth = 'Basic ' + btoa(`${creds.username}:${creds.password}`);
+                }
+            }
+
+            // If we have auth, make the call
+            if (auth) {
+                const res = await fetch(`${apiBaseUrl}/users?context=view`, {
                     headers: { 'Authorization': auth }
                 });
+
 
                 if (res.ok) {
                     const wpUsers = await res.json();
@@ -66,7 +100,7 @@ export const profilesApi = {
                             username: u.name || u.slug,
                             email: u.email || '',
                             role: role,
-                            created_at: new Date().toISOString(), // Mock, as WP doesn't expose reg date easily in simple view
+                            created_at: new Date().toISOString(),
                             updated_at: new Date().toISOString()
                         };
                     });

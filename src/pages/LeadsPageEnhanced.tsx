@@ -5,6 +5,7 @@ import { bulkOperations, csvHelper } from '@/db/helpers';
 import { profilesApi, activityLogsApi, followUpsApi } from '@/db/api';
 import { socialIntegration } from '@/services/socialIntegration';
 import { useAuth } from '@/contexts/AuthContext';
+import { useSite } from '@/contexts/SiteContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -146,6 +147,7 @@ export default function LeadsPageEnhanced() {
 
   const navigate = useNavigate();
   const { profile, hasPermission } = useAuth();
+  const { currentSite } = useSite();
   const { toast } = useToast();
 
 
@@ -214,7 +216,7 @@ export default function LeadsPageEnhanced() {
 
   useEffect(() => {
     loadLeads();
-  }, [currentPage, pageSize, searchQuery, statusFilter, sourceFilter, dateFilter]);
+  }, [currentPage, pageSize, searchQuery, statusFilter, sourceFilter, dateFilter, currentSite?.id]);
 
   const loadLeads = async () => {
     try {

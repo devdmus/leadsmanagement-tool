@@ -54,7 +54,8 @@ import {
   Tag as TagIcon,
   UserPlus
 } from 'lucide-react';
-import { wordpressApi } from '@/db/wordpressApi';
+import { useWordPressApi } from '@/hooks/useWordPressApi';
+import { useSite } from '@/contexts/SiteContext';
 import {
   Table,
   TableBody,
@@ -158,10 +159,12 @@ export default function BlogsPage() {
 
   const { profile } = useAuth();
   const { toast } = useToast();
+  const wordpressApi = useWordPressApi();
+  const { currentSite } = useSite();
 
   useEffect(() => {
     loadInitialData();
-  }, []);
+  }, [currentSite?.id]);
 
   const loadInitialData = async () => {
     await Promise.all([loadBlogs(), loadCategories(), loadTags(), loadUsers()]);

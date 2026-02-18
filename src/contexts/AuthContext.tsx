@@ -12,7 +12,6 @@ interface AuthContextType {
   profile: Profile | null;
   loading: boolean;
   isAdmin: boolean;
-  isSuperAdmin: boolean;
   hasPermission: (feature: string, permissionType: 'read' | 'write') => boolean;
 
   // placeholders (WordPress auth later)
@@ -39,8 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const [loading, setLoading] = useState(false);
 
-  const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
-  const isSuperAdmin = profile?.role === 'super_admin';
+  const isAdmin = profile?.role === 'admin';
 
   // Persistence
   useEffect(() => {
@@ -61,14 +59,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // 🔐 Static permission map
   const permissions: Record<UserRole, Record<string, Permission>> = {
-    super_admin: {
-      leads: { can_read: true, can_write: true },
-      users: { can_read: true, can_write: true },
-      activity_logs: { can_read: true, can_write: true },
-      subscriptions: { can_read: true, can_write: true },
-      seo_meta_tags: { can_read: true, can_write: true },
-      blogs: { can_read: true, can_write: true },
-    },
     admin: {
       leads: { can_read: true, can_write: true },
       users: { can_read: true, can_write: true },
@@ -164,7 +154,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       else if (wpUser.roles.includes('contributor')) appRole = 'sales_person';
       else if (wpUser.roles.includes('seo_manager')) appRole = 'seo_manager'; // Custom role fallback
       else if (wpUser.roles.includes('seo_person')) appRole = 'seo_person'; // Custom role fallback
-      else if (wpUser.roles.includes('super_admin')) appRole = 'super_admin'; // Super admin mapping
 
       const newProfile: Profile = {
         id: wpUser.id.toString(),
@@ -290,7 +279,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         profile,
         loading,
         isAdmin,
-        isSuperAdmin,
         hasPermission,
         signInWithUsername,
         signUpWithUsername,

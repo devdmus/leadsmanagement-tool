@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { useSite } from '@/contexts/SiteContext';
+// import { useSite } from '@/contexts/SiteContext';
 import { cn } from '@/lib/utils';
 import type { UserRole, Profile } from '../../types/types';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -21,9 +21,9 @@ import {
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
+// import { ScrollArea } from '@/components/ui/scroll-area';
 // DropdownMenu imports removed (now handled in SiteSwitcher)
-import { SiteSwitcher } from '@/components/common/SiteSwitcher';
+// import { SiteSwitcher } from '@/components/common/SiteSwitcher';
 import {
   Tooltip,
   TooltipContent,
@@ -32,16 +32,16 @@ import {
 } from "@/components/ui/tooltip"
 
 const navigation = [
-  { name: 'Dashboard', href: '/', icon: LayoutDashboard, roles: ['super_admin','admin','sales_manager','sales_person','seo_manager','seo_person','client'] as UserRole[] },
-  { name: 'Leads', href: '/leads', icon: Users, roles: ['super_admin','admin','sales_manager','sales_person','client'] as UserRole[] },
-  { name: 'SEO Meta Tags', href: '/seo', icon: Search, roles: ['super_admin','admin','seo_manager','seo_person'] as UserRole[] },
-  { name: 'Blogs', href: '/blogs', icon: BookOpen, roles: ['super_admin','admin','seo_manager','seo_person'] as UserRole[] },
-  { name: 'Sites', href: '/sites', icon: Globe, roles: ['super_admin'] as UserRole[] },
-  { name: 'IP Security', href: '/ip-security', icon: Shield, roles: ['super_admin','admin'] as UserRole[] },
+  { name: 'Dashboard', href: '/', icon: LayoutDashboard, roles: ['admin', 'sales_manager', 'sales_person', 'seo_manager', 'seo_person', 'client'] as UserRole[] },
+  { name: 'Leads', href: '/leads', icon: Users, roles: ['admin', 'sales_manager', 'sales_person', 'client'] as UserRole[] },
+  { name: 'SEO Meta Tags', href: '/seo', icon: Search, roles: ['admin', 'seo_manager', 'seo_person'] as UserRole[] },
+  { name: 'Blogs', href: '/blogs', icon: BookOpen, roles: ['admin', 'seo_manager', 'seo_person'] as UserRole[] },
+  { name: 'Sites', href: '/sites', icon: Globe, roles: ['admin'] as UserRole[] },
+  { name: 'IP Security', href: '/ip-security', icon: Shield, roles: ['admin'] as UserRole[] },
   { name: 'Subscription', href: '/subscription', icon: FileText, roles: ['client'] as UserRole[] },
-  { name: 'User Management', href: '/users', icon: Settings, roles: ['super_admin','admin'] as UserRole[] },
-  { name: 'Permissions', href: '/permissions', icon: Shield, roles: ['super_admin'] as UserRole[] },
-  { name: 'Activity Logs', href: '/activity', icon: FileText, roles: ['super_admin','admin','sales_manager','seo_manager'] as UserRole[] },
+  { name: 'User Management', href: '/users', icon: Settings, roles: ['admin'] as UserRole[] },
+  { name: 'Permissions', href: '/permissions', icon: Shield, roles: ['admin'] as UserRole[] },
+  { name: 'Activity Logs', href: '/activity', icon: FileText, roles: ['admin', 'sales_manager', 'seo_manager'] as UserRole[] },
 ];
 
 interface AppSidebarProps {
@@ -54,11 +54,11 @@ export function AppSidebar({ isCollapsed = false, toggleSidebar }: AppSidebarPro
   const [isHovered, setIsHovered] = useState(false);
   const location = useLocation();
   const { profile, signOut } = useAuth();
-  const { currentSite, setCurrentSite, getAccessibleSites } = useSite();
+  // const { currentSite, setCurrentSite, getAccessibleSites } = useSite();
 
-  const accessibleSites = profile
-    ? getAccessibleSites((profile as Profile).id, (profile as Profile).role)
-    : [];
+  // const accessibleSites = profile
+  //   ? getAccessibleSites((profile as Profile).id, (profile as Profile).role)
+  //   : [];
 
   const filteredNavigation = navigation.filter(item =>
     profile && item.roles.includes((profile as Profile).role as UserRole)
@@ -118,8 +118,7 @@ export function AppSidebar({ isCollapsed = false, toggleSidebar }: AppSidebarPro
         </div>
       </div>
 
-      {/* NAVIGATION */}
-      {/* Site Switcher */}
+      {/* Site Switcher - Disabled via request */}
       {/* <SiteSwitcher
         accessibleSites={accessibleSites}
         currentSite={currentSite}
@@ -145,7 +144,7 @@ export function AppSidebar({ isCollapsed = false, toggleSidebar }: AppSidebarPro
                         className={cn(
                           'relative flex items-center rounded-xl transition-all duration-300 group overflow-hidden',
                           isActive
-                          // changed color and bg for active state to match new design
+                            // changed color and bg for active state to match new design
                             ? 'text-white bg-[#ff0000] shadow-lg font-semibold scale-[1.02]'
                             : 'text-white/90 hover:bg-white/10 hover:text-white',
                           isCollapsed ? "justify-center px-2 py-3" : "px-4 py-3.5"

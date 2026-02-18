@@ -4,10 +4,13 @@ import { wpLeadsApi } from '@/db/wpLeadsApi';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { Users, CheckCircle, Clock, AlertCircle } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useSite } from '@/contexts/SiteContext';
 
 const COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))'];
 
 export default function DashboardPage() {
+  const { currentSite } = useSite();
+
   const [stats, setStats] = useState<{
     total: number;
     pending: number;
@@ -24,8 +27,9 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setLoading(true);
     loadStats();
-  }, []);
+  }, [currentSite?.id]);
 
   const loadStats = async () => {
     try {
