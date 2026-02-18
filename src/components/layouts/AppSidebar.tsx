@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-// import { useSite } from '@/contexts/SiteContext';
+import { useSite } from '@/contexts/SiteContext';
 import { cn } from '@/lib/utils';
 import type { UserRole, Profile } from '../../types/types';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -21,9 +21,6 @@ import {
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-// import { ScrollArea } from '@/components/ui/scroll-area';
-// DropdownMenu imports removed (now handled in SiteSwitcher)
-// import { SiteSwitcher } from '@/components/common/SiteSwitcher';
 import {
   Tooltip,
   TooltipContent,
@@ -54,11 +51,8 @@ export function AppSidebar({ isCollapsed = false, toggleSidebar }: AppSidebarPro
   const [isHovered, setIsHovered] = useState(false);
   const location = useLocation();
   const { profile, signOut } = useAuth();
-  // const { currentSite, setCurrentSite, getAccessibleSites } = useSite();
-
-  // const accessibleSites = profile
-  //   ? getAccessibleSites((profile as Profile).id, (profile as Profile).role)
-  //   : [];
+  // useSite kept so SiteContext stays available to child pages via context
+  useSite();
 
   const filteredNavigation = navigation.filter(item =>
     profile && item.roles.includes((profile as Profile).role as UserRole)
@@ -118,14 +112,7 @@ export function AppSidebar({ isCollapsed = false, toggleSidebar }: AppSidebarPro
         </div>
       </div>
 
-      {/* Site Switcher - Disabled via request */}
-      {/* <SiteSwitcher
-        accessibleSites={accessibleSites}
-        currentSite={currentSite}
-        setCurrentSite={(id) => setCurrentSite(String(id))}
-        isCollapsed={isCollapsed}
-      /> */}
-      <div className="flex-1 px-4 py-2 overflow-visible">
+<div className="flex-1 px-4 py-2 overflow-visible">
         <nav className="space-y-1.5">
           <TooltipProvider delayDuration={0}>
             <AnimatePresence>
