@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { wpLeadsApi } from '@/db/wpLeadsApi';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Users, CheckCircle, Clock, AlertCircle } from 'lucide-react';
+import { Users, CheckCircle, UserRoundCheck , AlertCircle, TriangleAlert, BellRing } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useSite } from '@/contexts/SiteContext';
 
@@ -106,11 +106,11 @@ export default function DashboardPage() {
         <Card className="hover:shadow-lg transition-shadow">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Leads</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
+            <Users className="h-8 w-8 text-muted-foreground text-[#ff0000]" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats?.total || 0}</div>
-            <p className="text-xs text-muted-foreground mt-1">
+            <div className="text-2xl font-bold text-[#ff0000]">{stats?.total || 0}</div>
+            <p className="text-sm text-muted-foreground mt-1">
               All leads from all sources
             </p>
           </CardContent>
@@ -119,11 +119,11 @@ export default function DashboardPage() {
         <Card className="hover:shadow-lg transition-shadow">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Pending</CardTitle>
-            <Clock className="h-4 w-4 text-warning" />
+            <TriangleAlert className="h-8 w-8 text-[#f59e0b]" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-warning">{stats?.pending || 0}</div>
-            <p className="text-xs text-muted-foreground mt-1">
+            <p className="text-sm text-muted-foreground mt-1">
               Awaiting follow-up
             </p>
           </CardContent>
@@ -132,11 +132,11 @@ export default function DashboardPage() {
         <Card className="hover:shadow-lg transition-shadow">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Completed</CardTitle>
-            <CheckCircle className="h-4 w-4 text-success" />
+            <UserRoundCheck  className="h-8 w-8 text-success" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-success">{stats?.completed || 0}</div>
-            <p className="text-xs text-muted-foreground mt-1">
+            <p className="text-sm text-muted-foreground mt-1">
               Successfully closed
             </p>
           </CardContent>
@@ -145,11 +145,11 @@ export default function DashboardPage() {
         <Card className="hover:shadow-lg transition-shadow">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Reminder</CardTitle>
-            <AlertCircle className="h-4 w-4 text-info" />
+            <BellRing  className="h-8 w-8 text-info" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-info">{stats?.remainder || 0}</div>
-            <p className="text-xs text-muted-foreground mt-1">
+            <p className="text-sm text-muted-foreground mt-1">
               Needs attention
             </p>
           </CardContent>
