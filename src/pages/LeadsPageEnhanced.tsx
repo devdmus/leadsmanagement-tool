@@ -723,7 +723,7 @@ export default function LeadsPageEnhanced() {
               </SelectContent>
             </Select>
 
-            <Button
+            <Button className='self-end'
               variant="outline"
               onClick={() => {
                 setSearchQuery('');
