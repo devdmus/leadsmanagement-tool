@@ -37,7 +37,6 @@ const navigation = [
   { name: 'IP Security', href: '/ip-security', icon: Shield, roles: ['admin'] as UserRole[] },
   { name: 'Subscription', href: '/subscription', icon: FileText, roles: ['client'] as UserRole[] },
   { name: 'User Management', href: '/users', icon: Settings, roles: ['admin'] as UserRole[] },
-  { name: 'Permissions', href: '/permissions', icon: Shield, roles: ['admin'] as UserRole[] },
   { name: 'Activity Logs', href: '/activity', icon: FileText, roles: ['admin', 'sales_manager', 'seo_manager'] as UserRole[] },
 ];
 

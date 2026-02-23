@@ -367,6 +367,51 @@ export function createWordPressApi(wpBaseUrl: string, authHeader: Record<string,
       return res.json();
     },
 
+    // ── IP Whitelist (crm/v1) ─────────────────────────────
+    async getIPWhitelist(customHeaders?: Record<string, string>) {
+      const res = await fetch(`${WP_JSON_BASE}/crm/v1/ip-whitelist`, {
+        headers: customHeaders || AUTH_HEADER,
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(`IP whitelist fetch failed (HTTP ${res.status}): ${body.slice(0, 120)}`);
+      }
+      return res.json() as Promise<any[]>;
+    },
+
+    async addIPWhitelist(entry: {
+      id: string;
+      ip: string;
+      userId: string;
+      username: string;
+      label: string;
+      addedBy: string;
+      addedAt: string;
+    }, customHeaders?: Record<string, string>) {
+      const res = await fetch(`${WP_JSON_BASE}/crm/v1/ip-whitelist`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(customHeaders || AUTH_HEADER),
+        },
+        body: JSON.stringify(entry),
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(`Failed to add IP (HTTP ${res.status}): ${body.slice(0, 120)}`);
+      }
+      return res.json();
+    },
+
+    async deleteIPWhitelist(id: string, customHeaders?: Record<string, string>) {
+      const res = await fetch(`${WP_JSON_BASE}/crm/v1/ip-whitelist/${id}`, {
+        method: 'DELETE',
+        headers: customHeaders || AUTH_HEADER,
+      });
+      if (!res.ok) throw new Error('Failed to remove IP from whitelist');
+      return res.json();
+    },
+
     // ── Post Types (for SEO page) ─────────────────────────
     async getPostTypes() {
       const res = await fetch(`${WP_BASE_URL}/types`);

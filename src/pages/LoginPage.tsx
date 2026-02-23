@@ -52,7 +52,6 @@ export default function LoginPage() {
       >
         {/* Left Side - Branding & Decorative */}
         <div className="w-full md:w-1/2 relative overflow-hidden bg-gradient-to-br from-[#1F86E0] to-[#0A4F8B] p-12 text-white flex flex-col justify-center items-center text-center">
-          {/* Abstract Shapes for 3D Feel */}
           <motion.div
             animate={{ rotate: 360 }}
             transition={{ duration: 20, repeat: Infinity, ease: "linear" }}

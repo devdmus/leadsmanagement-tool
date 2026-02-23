@@ -3,6 +3,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Shield, RefreshCw } from 'lucide-react';
+import { createWordPressApi } from '@/db/wordpressApi';
 
 interface WhitelistedIP {
     id: string;
@@ -14,11 +15,11 @@ interface WhitelistedIP {
     addedAt: string;
 }
 
-const IP_WHITELIST_KEY = 'crm_ip_whitelist';
+const DEFAULT_WP_JSON_BASE = 'https://digitmarketus.com/Bhairavi/wp-json';
 const ALLOWED_PRIMARY_IP = '183.82.116.22';
 
 export function IPSecurityGuard({ children }: { children: React.ReactNode }) {
-    const { profile, signOut } = useAuth();
+    const { profile, signOut, getWpAuthHeader } = useAuth();
     const [isValidating, setIsValidating] = useState(true);
     const [accessRestricted, setAccessRestricted] = useState(false);
     const [currentIP, setCurrentIP] = useState<string | null>(null);
@@ -32,10 +33,10 @@ export function IPSecurityGuard({ children }: { children: React.ReactNode }) {
             }
 
             try {
-                // Get current IP
+                // Get current public IP
                 const response = await fetch('https://api.ipify.org?format=json');
                 if (!response.ok) {
-                    // If we can't get IP, we must block for safety in this strict mode
+                    // Cannot verify IP — block for safety
                     setAccessRestricted(true);
                     setIsValidating(false);
                     return;
@@ -44,39 +45,101 @@ export function IPSecurityGuard({ children }: { children: React.ReactNode }) {
                 const ipData = await response.json();
                 setCurrentIP(ipData.ip);
 
-                // 1. Check if it's the primary allowed IP
+                // 1. Hardcoded primary IP always allowed
                 if (ipData.ip === ALLOWED_PRIMARY_IP) {
                     setIsValidating(false);
                     return;
                 }
 
-                // 2. Check if IP is in whitelist for this user
-                const whitelistData = localStorage.getItem(IP_WHITELIST_KEY);
-                if (whitelistData) {
-                    const whitelist: WhitelistedIP[] = JSON.parse(whitelistData);
-                    const isWhitelisted = whitelist.some(
-                        (entry) => entry.ip === ipData.ip && entry.userId === profile.id
-                    );
+                // 2. Fetch whitelist from WordPress (shared, cross-device)
+                // Always use the default (Bhairavi) site — that's where the plugin & table live.
+                try {
+                    // Get auth for the default Bhairavi site (not the currently selected site)
+                    const getBhairavaAuth = (): string => {
+                        try {
+                            const siteCreds = localStorage.getItem('crm_site_credentials');
+                            if (siteCreds) {
+                                const map = JSON.parse(siteCreds);
+                                const creds = map['default'] || map['bhairavi'];
+                                if (creds?.username && creds?.password) {
+                                    return 'Basic ' + btoa(`${creds.username}:${creds.password}`);
+                                }
+                                // Try the isDefault site's creds
+                                const savedSites = localStorage.getItem('crm_wp_sites');
+                                if (savedSites) {
+                                    const sites = JSON.parse(savedSites);
+                                    const defaultSite = sites.find((s: any) => s.isDefault);
+                                    if (defaultSite && map[defaultSite.id]) {
+                                        const { username, password } = map[defaultSite.id];
+                                        return 'Basic ' + btoa(`${username}:${password}`);
+                                    }
+                                }
+                            }
+                        } catch (_) {}
+                        return getWpAuthHeader();
+                    };
+
+                    const authHeader = getBhairavaAuth();
+                    const api = createWordPressApi(DEFAULT_WP_JSON_BASE, { Authorization: authHeader });
+                    const whitelist: WhitelistedIP[] = await api.getIPWhitelist();
+
+                    const isWhitelisted = Array.isArray(whitelist) && whitelist.some((entry) => {
+                        if (entry.ip !== ipData.ip) return false;
+                        const storedUserId = String(entry.userId);
+                        const profileId = String(profile.id);
+                        // Support both old format ("42") and new composite format ("siteId_42")
+                        // Extract just the WP user ID from composite "siteId_wpUserId"
+                        const wpIdFromStored = storedUserId.includes('_')
+                            ? storedUserId.split('_').pop() ?? storedUserId
+                            : storedUserId;
+                        return wpIdFromStored === profileId || storedUserId === profileId;
+                    });
 
                     if (isWhitelisted) {
                         setIsValidating(false);
                         return;
                     }
+                } catch (whitelistErr) {
+                    // If WordPress endpoint not yet installed, fall back to localStorage whitelist
+                    // so existing users aren't immediately locked out
+                    console.warn('WordPress IP whitelist endpoint not available, falling back to localStorage:', whitelistErr);
+                    const whitelistData = localStorage.getItem('crm_ip_whitelist');
+                    if (whitelistData) {
+                        try {
+                            const localWhitelist: WhitelistedIP[] = JSON.parse(whitelistData);
+                            const isWhitelisted = localWhitelist.some(
+                                (entry) => entry.ip === ipData.ip && String(entry.userId) === String(profile.id)
+                            );
+                            if (isWhitelisted) {
+                                setIsValidating(false);
+                                return;
+                            }
+                        } catch (_) {}
+                    }
                 }
 
-                // If we reach here, the IP is NOT authorized
+                // Not authorized — log the attempt to WordPress
                 setAccessRestricted(true);
+                try {
+                    const authHeader = getWpAuthHeader();
+                    const api = createWordPressApi(DEFAULT_WP_JSON_BASE, { Authorization: authHeader });
+                    await api.logActivity(
+                        'unauthorized_attempt',
+                        `Blocked login attempt from IP ${ipData.ip} for user ${profile.username}`
+                    );
+                } catch (_) {
+                    // Fallback: log locally if WordPress unavailable
+                    const logs = JSON.parse(localStorage.getItem('crm_ip_logs') || '[]');
+                    logs.unshift({
+                        action: 'unauthorized_attempt',
+                        ip: ipData.ip,
+                        userId: profile.id,
+                        username: profile.username,
+                        timestamp: new Date().toISOString(),
+                    });
+                    localStorage.setItem('crm_ip_logs', JSON.stringify(logs.slice(0, 100)));
+                }
 
-                // Log the unauthorized access attempt
-                const logs = JSON.parse(localStorage.getItem('crm_ip_logs') || '[]');
-                logs.unshift({
-                    action: 'unauthorized_attempt',
-                    ip: ipData.ip,
-                    userId: profile.id,
-                    username: profile.username,
-                    timestamp: new Date().toISOString(),
-                });
-                localStorage.setItem('crm_ip_logs', JSON.stringify(logs.slice(0, 100)));
             } catch (error) {
                 console.warn('IP validation error:', error);
                 setAccessRestricted(true);
@@ -94,20 +157,29 @@ export function IPSecurityGuard({ children }: { children: React.ReactNode }) {
         window.location.href = '/login';
     };
 
-    const handleRequestPermission = () => {
+    const handleRequestPermission = async () => {
         if (!currentIP || !profile) return;
 
-        // Log the permission request
-        const logs = JSON.parse(localStorage.getItem('crm_ip_logs') || '[]');
-        logs.unshift({
-            action: 'permission_requested',
-            ip: currentIP,
-            userId: profile.id,
-            username: profile.username,
-            timestamp: new Date().toISOString(),
-            status: 'pending'
-        });
-        localStorage.setItem('crm_ip_logs', JSON.stringify(logs.slice(0, 100)));
+        try {
+            const authHeader = getWpAuthHeader();
+            const api = createWordPressApi(DEFAULT_WP_JSON_BASE, { Authorization: authHeader });
+            await api.logActivity(
+                'permission_requested',
+                `User ${profile.username} (ID: ${profile.id}) is requesting access from IP ${currentIP}`
+            );
+        } catch (_) {
+            // Fallback: log locally
+            const logs = JSON.parse(localStorage.getItem('crm_ip_logs') || '[]');
+            logs.unshift({
+                action: 'permission_requested',
+                ip: currentIP,
+                userId: profile.id,
+                username: profile.username,
+                timestamp: new Date().toISOString(),
+                status: 'pending',
+            });
+            localStorage.setItem('crm_ip_logs', JSON.stringify(logs.slice(0, 100)));
+        }
 
         setRequestSent(true);
     };
@@ -148,8 +220,8 @@ export function IPSecurityGuard({ children }: { children: React.ReactNode }) {
                         </div>
 
                         {requestSent ? (
-                            <div className="bg-success/10 border border-success/20 p-4 rounded-lg text-center">
-                                <p className="text-success font-medium text-sm">
+                            <div className="bg-green-50 border border-green-200 p-4 rounded-lg text-center">
+                                <p className="text-green-700 font-medium text-sm">
                                     Permission request sent!
                                 </p>
                                 <p className="text-xs text-muted-foreground mt-1">

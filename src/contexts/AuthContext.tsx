@@ -183,33 +183,67 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const authHeader = 'Basic ' + btoa(`${username}:${password}`);
 
-      // Resolve which site to authenticate against
-      let targetApiBase = DEFAULT_API_BASE;
-      let targetSiteId = siteId;
+      // Build the list of sites to try
+      // If a specific siteId is given (SiteSwitcher), only try that one.
+      // Otherwise (LoginPage), try ALL known sites — whichever accepts the credentials wins.
+      let sitesToTry: Array<{ id: string; apiBase: string }> = [];
 
       if (siteId) {
-        // Explicit site passed (from site switcher)
+        // Explicit site — resolve its URL
+        let apiBase = DEFAULT_API_BASE;
         try {
           const savedSites = localStorage.getItem('crm_wp_sites');
           if (savedSites) {
             const sites = JSON.parse(savedSites);
             const site = sites.find((s: any) => s.id === siteId);
-            if (site?.url) targetApiBase = toApiBase(site.url);
+            if (site?.url) apiBase = toApiBase(site.url);
           }
         } catch (_) {}
+        sitesToTry = [{ id: siteId, apiBase }];
+      } else {
+        // No siteId — try all known sites (default first, then rest)
+        try {
+          const savedSites = localStorage.getItem('crm_wp_sites');
+          if (savedSites) {
+            const sites: Array<{ id: string; url: string; isDefault?: boolean }> = JSON.parse(savedSites);
+            // Sort: default site first
+            const sorted = [...sites].sort((a, b) => (b.isDefault ? 1 : 0) - (a.isDefault ? 1 : 0));
+            sitesToTry = sorted.map(s => ({ id: s.id, apiBase: toApiBase(s.url) }));
+          }
+        } catch (_) {}
+        // Always include default as fallback even if localStorage is empty
+        if (sitesToTry.length === 0) {
+          sitesToTry = [{ id: 'default', apiBase: DEFAULT_API_BASE }];
+        }
       }
-      // When no siteId is given (LoginPage), always authenticate against DEFAULT_API_BASE
 
-      // Authenticate against the target site
-      const response = await fetch(`${targetApiBase}/wp/v2/users/me?context=edit`, {
-        headers: { Authorization: authHeader },
-      });
+      // Try each site in sequence until one succeeds
+      let wpUser: any = null;
+      let targetApiBase = DEFAULT_API_BASE;
+      let targetSiteId: string | undefined;
+      let lastError = 'Invalid credentials — check your username and Application Password.';
 
-      if (!response.ok) {
-        throw new Error('Invalid credentials — check your username and Application Password for this site.');
+      for (const site of sitesToTry) {
+        try {
+          const response = await fetch(`${site.apiBase}/wp/v2/users/me?context=edit`, {
+            headers: { Authorization: authHeader },
+          });
+          if (response.ok) {
+            wpUser = await response.json();
+            targetApiBase = site.apiBase;
+            targetSiteId = site.id;
+            break; // Found the right site
+          } else {
+            lastError = `Invalid credentials for site ${site.id} (HTTP ${response.status})`;
+          }
+        } catch (fetchErr) {
+          lastError = `Could not reach site ${site.id}`;
+        }
       }
 
-      const wpUser = await response.json();
+      if (!wpUser) {
+        throw new Error(lastError);
+      }
 
       // Map WP roles → app roles
       let appRole: UserRole = 'client';
@@ -236,6 +270,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           ...prev,
           [targetSiteId!]: { username, password },
         }));
+        // Set the current site to whichever site authenticated the user
+        localStorage.setItem('crm_current_site_id', targetSiteId);
       }
 
       // Also store as global credentials (backward compat + fallback)
