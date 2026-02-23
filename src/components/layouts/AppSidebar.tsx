@@ -110,8 +110,12 @@ export function AppSidebar({ isCollapsed = false, toggleSidebar }: AppSidebarPro
 
         </div>
       </div>
-
-<div className="flex-1 px-4 py-2 overflow-visible">
+      <div
+        className={cn(
+          "flex-1 px-4 py-2 transition-all duration-300 sidebar-scroll-container",
+          isHovered ? "overflow-y-auto" : "overflow-y-hidden"
+        )}
+      >
         <nav className="space-y-1.5">
           <TooltipProvider delayDuration={0}>
             <AnimatePresence>
