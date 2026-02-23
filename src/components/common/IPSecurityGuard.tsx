@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Shield, RefreshCw } from 'lucide-react';
 import { createWordPressApi } from '@/db/wordpressApi';
+import { getCurrentSiteFromCache } from '@/utils/siteCache';
 
 interface WhitelistedIP {
     id: string;
@@ -15,8 +16,20 @@ interface WhitelistedIP {
     addedAt: string;
 }
 
-const DEFAULT_WP_JSON_BASE = 'https://digitmarketus.com/Bhairavi/wp-json';
 const ALLOWED_PRIMARY_IP = '183.82.116.22';
+
+// Dynamically get the current site's wp-json base from siteCache
+function getCurrentWpJsonBase(): string {
+    try {
+        const site = getCurrentSiteFromCache();
+        if (site?.url) {
+            let url = site.url.replace(/\/$/, '');
+            if (!url.includes('/wp-json')) url += '/wp-json';
+            return url;
+        }
+    } catch (_) { }
+    return '';
+}
 
 export function IPSecurityGuard({ children }: { children: React.ReactNode }) {
     const { profile, signOut, getWpAuthHeader } = useAuth();
@@ -28,6 +41,12 @@ export function IPSecurityGuard({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         const validateSession = async () => {
             if (!profile) {
+                setIsValidating(false);
+                return;
+            }
+
+            // Super admin always has full access — skip IP validation
+            if (profile.role === 'super_admin') {
                 setIsValidating(false);
                 return;
             }
@@ -52,35 +71,16 @@ export function IPSecurityGuard({ children }: { children: React.ReactNode }) {
                 }
 
                 // 2. Fetch whitelist from WordPress (shared, cross-device)
-                // Always use the default (Bhairavi) site — that's where the plugin & table live.
+                // Uses the current site's wp-json endpoint
                 try {
-                    // Get auth for the default Bhairavi site (not the currently selected site)
-                    const getBhairavaAuth = (): string => {
-                        try {
-                            const siteCreds = localStorage.getItem('crm_site_credentials');
-                            if (siteCreds) {
-                                const map = JSON.parse(siteCreds);
-                                const creds = map['default'] || map['bhairavi'];
-                                if (creds?.username && creds?.password) {
-                                    return 'Basic ' + btoa(`${creds.username}:${creds.password}`);
-                                }
-                                // Try the isDefault site's creds
-                                const savedSites = localStorage.getItem('crm_wp_sites');
-                                if (savedSites) {
-                                    const sites = JSON.parse(savedSites);
-                                    const defaultSite = sites.find((s: any) => s.isDefault);
-                                    if (defaultSite && map[defaultSite.id]) {
-                                        const { username, password } = map[defaultSite.id];
-                                        return 'Basic ' + btoa(`${username}:${password}`);
-                                    }
-                                }
-                            }
-                        } catch (_) {}
-                        return getWpAuthHeader();
-                    };
+                    const wpJsonBase = getCurrentWpJsonBase();
+                    if (!wpJsonBase) {
+                        // No site configured — skip remote whitelist check
+                        throw new Error('No site configured');
+                    }
 
-                    const authHeader = getBhairavaAuth();
-                    const api = createWordPressApi(DEFAULT_WP_JSON_BASE, { Authorization: authHeader });
+                    const authHeader = getWpAuthHeader();
+                    const api = createWordPressApi(wpJsonBase, { Authorization: authHeader });
                     const whitelist: WhitelistedIP[] = await api.getIPWhitelist();
 
                     const isWhitelisted = Array.isArray(whitelist) && whitelist.some((entry) => {
@@ -114,7 +114,7 @@ export function IPSecurityGuard({ children }: { children: React.ReactNode }) {
                                 setIsValidating(false);
                                 return;
                             }
-                        } catch (_) {}
+                        } catch (_) { }
                     }
                 }
 
@@ -122,7 +122,7 @@ export function IPSecurityGuard({ children }: { children: React.ReactNode }) {
                 setAccessRestricted(true);
                 try {
                     const authHeader = getWpAuthHeader();
-                    const api = createWordPressApi(DEFAULT_WP_JSON_BASE, { Authorization: authHeader });
+                    const api = createWordPressApi(getCurrentWpJsonBase(), { Authorization: authHeader });
                     await api.logActivity(
                         'unauthorized_attempt',
                         `Blocked login attempt from IP ${ipData.ip} for user ${profile.username}`
@@ -162,7 +162,7 @@ export function IPSecurityGuard({ children }: { children: React.ReactNode }) {
 
         try {
             const authHeader = getWpAuthHeader();
-            const api = createWordPressApi(DEFAULT_WP_JSON_BASE, { Authorization: authHeader });
+            const api = createWordPressApi(getCurrentWpJsonBase(), { Authorization: authHeader });
             await api.logActivity(
                 'permission_requested',
                 `User ${profile.username} (ID: ${profile.id}) is requesting access from IP ${currentIP}`

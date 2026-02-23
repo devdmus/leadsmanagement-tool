@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
 import { useSite, WordPressSite } from '@/contexts/SiteContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -25,12 +26,14 @@ import {
     AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Edit, Trash2, Globe, CheckCircle, ExternalLink, KeyRound, Loader2, ShieldCheck, ShieldAlert } from 'lucide-react';
+import { Plus, Edit, Trash2, Globe, CheckCircle, ExternalLink, KeyRound, Loader2, ShieldCheck, ShieldAlert, Users, Lock } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { createWordPressApi } from '@/db/wordpressApi';
 
 export default function SitesPage() {
     const { sites, currentSite, addSite, updateSite, deleteSite, setCurrentSite } = useSite();
+    const { profile } = useAuth();
+    const isSuperAdmin = profile?.role === 'super_admin';
     const { toast } = useToast();
 
     const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -38,6 +41,12 @@ export default function SitesPage() {
     const [editingSite, setEditingSite] = useState<WordPressSite | null>(null);
     const [testingId, setTestingId] = useState<string | null>(null);
     const [testResults, setTestResults] = useState<Record<string, 'ok' | 'fail'>>({});
+
+    // Access Management State
+    const [isAccessDialogOpen, setIsAccessDialogOpen] = useState(false);
+    const [accessSite, setAccessSite] = useState<WordPressSite | null>(null);
+    const [remoteAdmins, setRemoteAdmins] = useState<any[]>([]);
+    const [isLoadingAdmins, setIsLoadingAdmins] = useState(false);
 
     const [formData, setFormData] = useState({
         name: '',
@@ -50,40 +59,51 @@ export default function SitesPage() {
         setFormData({ name: '', url: '', username: '', appPassword: '' });
     };
 
-    const handleAdd = () => {
+    const handleAdd = async () => {
         if (!formData.name || !formData.url) {
             toast({ title: 'Error', description: 'Name and URL are required', variant: 'destructive' });
             return;
         }
-        addSite({
-            name: formData.name,
-            url: formData.url,
-            username: formData.username || undefined,
-            appPassword: formData.appPassword || undefined,
-        });
-        toast({ title: 'Site Added', description: `${formData.name} has been connected.` });
-        setIsAddDialogOpen(false);
-        resetForm();
+        try {
+            await addSite({
+                name: formData.name,
+                url: formData.url,
+                username: formData.username || undefined,
+                appPassword: formData.appPassword || undefined,
+            });
+            toast({ title: 'Site Added', description: `${formData.name} has been connected.` });
+            setIsAddDialogOpen(false);
+            resetForm();
+        } catch {
+            toast({ title: 'Error', description: 'Failed to save site. Is the server running?', variant: 'destructive' });
+        }
     };
 
-    const handleEdit = () => {
+    const handleEdit = async () => {
         if (!editingSite) return;
-        updateSite(editingSite.id, {
-            name: formData.name,
-            url: formData.url,
-            username: formData.username || undefined,
-            // Only update password if a new one was entered
-            ...(formData.appPassword ? { appPassword: formData.appPassword } : {}),
-        });
-        toast({ title: 'Site Updated', description: `${formData.name} credentials saved.` });
-        setIsEditDialogOpen(false);
-        setEditingSite(null);
-        resetForm();
+        try {
+            await updateSite(editingSite.id, {
+                name: formData.name,
+                url: formData.url,
+                username: formData.username || undefined,
+                ...(formData.appPassword ? { appPassword: formData.appPassword } : {}),
+            });
+            toast({ title: 'Site Updated', description: `${formData.name} credentials saved.` });
+            setIsEditDialogOpen(false);
+            setEditingSite(null);
+            resetForm();
+        } catch {
+            toast({ title: 'Error', description: 'Failed to update site.', variant: 'destructive' });
+        }
     };
 
-    const handleDelete = (site: WordPressSite) => {
-        deleteSite(site.id);
-        toast({ title: 'Site Removed', description: `${site.name} has been disconnected.` });
+    const handleDelete = async (site: WordPressSite) => {
+        try {
+            await deleteSite(site.id);
+            toast({ title: 'Site Removed', description: `${site.name} has been disconnected.` });
+        } catch {
+            toast({ title: 'Error', description: 'Failed to remove site.', variant: 'destructive' });
+        }
     };
 
     const openEditDialog = (site: WordPressSite) => {
@@ -130,6 +150,59 @@ export default function SitesPage() {
             });
         } finally {
             setTestingId(null);
+        }
+    };
+
+    const handleOpenAccess = async (site: WordPressSite) => {
+        if (!site.username || !site.appPassword) {
+            toast({
+                title: 'Credentials Required',
+                description: 'Please add WordPress credentials first to manage user access.',
+                variant: 'destructive'
+            });
+            return;
+        }
+
+        setAccessSite(site);
+        setIsAccessDialogOpen(true);
+        setIsLoadingAdmins(true);
+        setRemoteAdmins([]);
+
+        try {
+            const authHeader = 'Basic ' + btoa(`${site.username}:${site.appPassword}`);
+            const api = createWordPressApi(site.url, { Authorization: authHeader });
+            // Fetch WP users with administrator role
+            const users = await api.getUsers('administrator', { Authorization: authHeader }, 'edit');
+            setRemoteAdmins(users);
+        } catch (err) {
+            console.error('Failed to fetch remote admins:', err);
+            toast({
+                title: 'Fetch Failed',
+                description: 'Could not fetch administrators from the site. Check credentials.',
+                variant: 'destructive'
+            });
+            setIsAccessDialogOpen(false);
+        } finally {
+            setIsLoadingAdmins(false);
+        }
+    };
+
+    const toggleAdminAccess = async (adminId: string) => {
+        if (!accessSite) return;
+
+        const currentAssigned = accessSite.assignedAdmins || [];
+        const isAssigned = currentAssigned.includes(adminId);
+
+        const nextAssigned = isAssigned
+            ? currentAssigned.filter(id => id !== adminId)
+            : [...currentAssigned, adminId];
+
+        try {
+            await updateSite(accessSite.id, { assignedAdmins: nextAssigned });
+            // Update local state if the context hasn't refreshed yet
+            setAccessSite(prev => prev ? { ...prev, assignedAdmins: nextAssigned } : null);
+        } catch (err) {
+            toast({ title: 'Error', description: 'Failed to update access.', variant: 'destructive' });
         }
     };
 
@@ -328,6 +401,19 @@ export default function SitesPage() {
                                         )}
                                     </div>
 
+                                    {/* Super Admin Access Management */}
+                                    {isSuperAdmin && (
+                                        <Button
+                                            variant="secondary"
+                                            size="sm"
+                                            className="w-full bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200"
+                                            onClick={() => handleOpenAccess(site)}
+                                        >
+                                            <Users className="h-4 w-4 mr-2" />
+                                            Manage Access
+                                        </Button>
+                                    )}
+
                                     {/* Test Connection button */}
                                     <Button
                                         variant="outline"
@@ -391,6 +477,80 @@ export default function SitesPage() {
                             Cancel
                         </Button>
                         <Button onClick={handleEdit}>Save Changes</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Access Management Dialog */}
+            <Dialog open={isAccessDialogOpen} onOpenChange={setIsAccessDialogOpen}>
+                <DialogContent className="sm:max-w-[500px]">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Lock className="h-5 w-5 text-blue-600" />
+                            Manage Access: {accessSite?.name}
+                        </DialogTitle>
+                        <DialogDescription>
+                            Select which administrators from this WordPress site are allowed to see it in their CRM dashboard.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="py-4">
+                        {isLoadingAdmins ? (
+                            <div className="flex flex-col items-center justify-center py-12 space-y-3">
+                                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                                <p className="text-sm text-muted-foreground font-medium">Fetching administrators...</p>
+                            </div>
+                        ) : remoteAdmins.length === 0 ? (
+                            <div className="text-center py-8 rounded-lg bg-muted/30 border border-dashed">
+                                <p className="text-sm text-muted-foreground">No administrators found on this site.</p>
+                            </div>
+                        ) : (
+                            <div className="space-y-4">
+                                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                                    Available Administrators ({remoteAdmins.length})
+                                </p>
+                                <div className="max-h-[300px] overflow-y-auto pr-2 space-y-2 custom-scrollbar">
+                                    {remoteAdmins.map((admin) => {
+                                        const adminId = String(admin.id);
+                                        const isAssigned = (accessSite?.assignedAdmins || []).includes(adminId);
+
+                                        return (
+                                            <div
+                                                key={adminId}
+                                                className={`flex items-center justify-between p-3 rounded-xl border transition-all ${isAssigned
+                                                    ? 'bg-blue-50/50 border-blue-200'
+                                                    : 'bg-card border-border hover:border-blue-200'
+                                                    }`}
+                                            >
+                                                <div className="flex items-center gap-3">
+                                                    <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold text-xs">
+                                                        {admin.name.charAt(0).toUpperCase()}
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-sm font-semibold leading-none">{admin.name}</p>
+                                                        <p className="text-xs text-muted-foreground mt-1">{admin.email}</p>
+                                                    </div>
+                                                </div>
+                                                <Button
+                                                    size="sm"
+                                                    variant={isAssigned ? 'default' : 'outline'}
+                                                    className={isAssigned ? 'bg-blue-600 hover:bg-blue-700' : ''}
+                                                    onClick={() => toggleAdminAccess(adminId)}
+                                                >
+                                                    {isAssigned ? 'Revoke' : 'Grant Access'}
+                                                </Button>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <DialogFooter>
+                        <Button className="w-full" onClick={() => setIsAccessDialogOpen(false)}>
+                            Done
+                        </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

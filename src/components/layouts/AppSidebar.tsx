@@ -29,15 +29,16 @@ import {
 } from "@/components/ui/tooltip"
 
 const navigation = [
-  { name: 'Dashboard', href: '/', icon: LayoutDashboard, roles: ['admin', 'sales_manager', 'sales_person', 'seo_manager', 'seo_person', 'client'] as UserRole[] },
-  { name: 'Leads', href: '/leads', icon: Users, roles: ['admin', 'sales_manager', 'sales_person', 'client'] as UserRole[] },
-  { name: 'SEO Meta Tags', href: '/seo', icon: Search, roles: ['admin', 'seo_manager', 'seo_person'] as UserRole[] },
-  { name: 'Blogs', href: '/blogs', icon: BookOpen, roles: ['admin', 'seo_manager', 'seo_person'] as UserRole[] },
-  { name: 'Sites', href: '/sites', icon: Globe, roles: ['admin'] as UserRole[] },
-  { name: 'IP Security', href: '/ip-security', icon: Shield, roles: ['admin'] as UserRole[] },
-  { name: 'Subscription', href: '/subscription', icon: FileText, roles: ['client'] as UserRole[] },
-  { name: 'User Management', href: '/users', icon: Settings, roles: ['admin'] as UserRole[] },
-  { name: 'Activity Logs', href: '/activity', icon: FileText, roles: ['admin', 'sales_manager', 'seo_manager'] as UserRole[] },
+  { name: 'Dashboard', href: '/', icon: LayoutDashboard, roles: ['super_admin', 'admin', 'lead_manager', 'sales_person', 'seo_manager', 'seo_person', 'client'] as UserRole[] },
+  { name: 'Leads', href: '/leads', icon: Users, roles: ['super_admin', 'admin', 'lead_manager', 'sales_person', 'client'] as UserRole[], permissionKey: 'leads' },
+  { name: 'SEO Meta Tags', href: '/seo', icon: Search, roles: ['super_admin', 'admin', 'seo_manager', 'seo_person'] as UserRole[], permissionKey: 'seo_meta_tags' },
+  { name: 'Blogs', href: '/blogs', icon: BookOpen, roles: ['super_admin', 'admin', 'seo_manager', 'seo_person'] as UserRole[], permissionKey: 'blogs' },
+  { name: 'Sites', href: '/sites', icon: Globe, roles: ['super_admin', 'admin'] as UserRole[], permissionKey: 'sites' },
+  { name: 'IP Security', href: '/ip-security', icon: Shield, roles: ['super_admin'] as UserRole[], permissionKey: 'ip_security' },
+  { name: 'Subscription', href: '/subscription', icon: FileText, roles: ['client'] as UserRole[], permissionKey: 'subscriptions' },
+  { name: 'User Management', href: '/users', icon: Settings, roles: ['super_admin', 'admin'] as UserRole[], permissionKey: 'users' },
+  { name: 'Activity Logs', href: '/activity', icon: FileText, roles: ['super_admin', 'admin', 'lead_manager', 'seo_manager'] as UserRole[], permissionKey: 'activity_logs' },
+  { name: 'Permissions', href: '/permissions', icon: Shield, roles: ['super_admin'] as UserRole[], permissionKey: 'permissions' },
 ];
 
 interface AppSidebarProps {
@@ -49,13 +50,24 @@ export function AppSidebar({ isCollapsed = false, toggleSidebar }: AppSidebarPro
 
   const [isHovered, setIsHovered] = useState(false);
   const location = useLocation();
-  const { profile, signOut } = useAuth();
+  const { profile, signOut, hasPermission } = useAuth();
   // useSite kept so SiteContext stays available to child pages via context
   useSite();
 
-  const filteredNavigation = navigation.filter(item =>
-    profile && item.roles.includes((profile as Profile).role as UserRole)
-  );
+  const filteredNavigation = navigation.filter(item => {
+    if (!profile) return false;
+
+    // 1. Check basic role restriction
+    const roleMatch = item.roles.includes((profile as Profile).role as UserRole);
+    if (!roleMatch) return false;
+
+    // 2. If a permission key is provided, check actual permission matrix
+    if ('permissionKey' in item && item.permissionKey) {
+      return hasPermission(item.permissionKey as string, 'read');
+    }
+
+    return true;
+  });
 
   return (
     <div

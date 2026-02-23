@@ -30,7 +30,7 @@ interface ServerLog {
 }
 
 export default function ActivityPage() {
-  const { hasPermission, getWpAuthHeader } = useAuth();
+  const { hasPermission, isSuperAdmin, getWpAuthHeader } = useAuth();
   const { currentSite, getApiBase, getAuthHeader } = useSite();
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -49,7 +49,8 @@ export default function ActivityPage() {
     setNoCredentials(false);
 
     // If the current site has no dedicated credentials, skip the fetch gracefully
-    if (currentSite && !currentSite.isDefault && !currentSite.username) {
+    // EXCEPT for Super Admins, who may have fallback credentials or full access.
+    if (currentSite && !currentSite.isDefault && !currentSite.username && !isSuperAdmin) {
       setNoCredentials(true);
       setLogs([]);
       setLoading(false);
@@ -58,7 +59,7 @@ export default function ActivityPage() {
 
     try {
       const siteAuthHeader = getAuthHeader();
-      const userAuthHeader = getWpAuthHeader();
+      const userAuthHeader = getWpAuthHeader(currentSite?.id);
       const authValue = siteAuthHeader || (userAuthHeader ? userAuthHeader : null);
 
       const api = createWordPressApi(

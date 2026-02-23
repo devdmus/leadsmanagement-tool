@@ -44,10 +44,20 @@ import {
 import { Plus, Trash2, Shield, Globe, History, RefreshCw } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { createWordPressApi } from '@/db/wordpressApi';
+import { getCurrentSiteFromCache, getAllSitesFromCache } from '@/utils/siteCache';
 
-// IP Security always operates against the default (Bhairavi) WordPress site
-// because the plugin & whitelist table live there, not on sub-sites.
-const DEFAULT_WP_JSON_BASE = 'https://digitmarketus.com/Bhairavi/wp-json';
+// Dynamically get the current site's wp-json base from siteCache
+function getCurrentWpJsonBase(): string {
+    try {
+        const site = getCurrentSiteFromCache();
+        if (site?.url) {
+            let url = site.url.replace(/\/$/, '');
+            if (!url.includes('/wp-json')) url += '/wp-json';
+            return url;
+        }
+    } catch (_) { }
+    return '';
+}
 
 interface WhitelistedIP {
     id: string;
@@ -93,39 +103,32 @@ export default function IPSecurityPage() {
     const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
     const [formData, setFormData] = useState({ ip: '', userId: '', label: '' });
 
-    // IP whitelist API always targets the default (Bhairavi) site — the plugin lives there.
-    // Priority: Bhairavi's per-site saved credentials → any saved credentials
-    const getBhairavaAuth = (): string => {
+    // Get auth header for the current site
+    const getSiteAuth = (): string => {
         try {
-            // 1. Try per-site credentials for the default 'bhairavi' / 'default' site
+            // 1. Try per-site credentials for the current site
+            const currentSiteId = localStorage.getItem('crm_current_site_id');
             const siteCreds = localStorage.getItem('crm_site_credentials');
-            if (siteCreds) {
+            if (currentSiteId && siteCreds) {
                 const map = JSON.parse(siteCreds);
-                // Try both 'default' and 'bhairavi' keys
-                const creds = map['default'] || map['bhairavi'];
+                const creds = map[currentSiteId];
                 if (creds?.username && creds?.password) {
                     return 'Basic ' + btoa(`${creds.username}:${creds.password}`);
                 }
             }
-            // 2. Try finding the default site's credentials from sites list
-            const savedSites = localStorage.getItem('crm_wp_sites');
-            if (savedSites && siteCreds) {
-                const sites = JSON.parse(savedSites);
-                const map = JSON.parse(siteCreds);
-                const defaultSite = sites.find((s: any) => s.isDefault);
-                if (defaultSite && map[defaultSite.id]) {
-                    const { username, password } = map[defaultSite.id];
-                    return 'Basic ' + btoa(`${username}:${password}`);
-                }
-            }
-        } catch (_) {}
-        // 3. Fallback: use whatever global credentials are stored
+        } catch (_) { }
+        // 2. Fallback: use whatever global credentials are stored
         return getWpAuthHeader();
     };
 
     const getApi = useCallback(() => {
-        const authHeader = getBhairavaAuth();
-        return createWordPressApi(DEFAULT_WP_JSON_BASE, { Authorization: authHeader });
+        const authHeader = getSiteAuth();
+        const wpJsonBase = getCurrentWpJsonBase();
+        if (!wpJsonBase) {
+            console.warn('No site configured for IP Security');
+            return createWordPressApi('', { Authorization: authHeader });
+        }
+        return createWordPressApi(wpJsonBase, { Authorization: authHeader });
     }, []);
 
     // ── Fetch whitelist from WordPress ─────────────────────────────────────────
@@ -178,15 +181,12 @@ export default function IPSecurityPage() {
         const loadUsers = async () => {
             const allUsers: Array<{ id: string; username: string; site: string }> = [];
             try {
-                const savedSites = localStorage.getItem('crm_wp_sites');
-                const siteCreds = localStorage.getItem('crm_site_credentials');
-                const sites: Array<{ id: string; url: string; name: string; isDefault?: boolean }> =
-                    savedSites ? JSON.parse(savedSites) : [];
-                const credsMap: Record<string, { username: string; password: string }> =
-                    siteCreds ? JSON.parse(siteCreds) : {};
+                const sites = getAllSitesFromCache();
+                const siteCreds: Record<string, { username: string; password: string }> =
+                    JSON.parse(localStorage.getItem('crm_site_credentials') || '{}');
 
                 for (const site of sites) {
-                    const creds = credsMap[site.id];
+                    const creds = siteCreds[site.id];
                     if (!creds) continue;
                     const auth = 'Basic ' + btoa(`${creds.username}:${creds.password}`);
                     const siteBase = site.url.replace(/\/$/, '') + '/wp-json';
@@ -209,9 +209,9 @@ export default function IPSecurityPage() {
                                 }
                             });
                         }
-                    } catch (_) {}
+                    } catch (_) { }
                 }
-            } catch (_) {}
+            } catch (_) { }
 
             if (allUsers.length > 0) {
                 setUsers(allUsers);
@@ -230,7 +230,7 @@ export default function IPSecurityPage() {
             fetch('https://api.ipify.org?format=json')
                 .then(r => r.ok ? r.json() : null)
                 .then(data => { if (data?.ip) setCurrentIP(data.ip); })
-                .catch(() => {});
+                .catch(() => { });
         }
     }, [currentSite?.id]);
 
@@ -325,7 +325,7 @@ export default function IPSecurityPage() {
     };
 
     // ── Guard ─────────────────────────────────────────────────────────────────
-    if (!profile || profile.role !== 'admin') {
+    if (!profile || profile.role !== 'super_admin') {
         return (
             <div className="flex items-center justify-center min-h-[400px]">
                 <p className="text-muted-foreground">You don't have permission to access this page.</p>
@@ -366,7 +366,7 @@ export default function IPSecurityPage() {
                         IP Security Settings
                     </h1>
                     <p className="text-muted-foreground">
-                        Manage allowed IP addresses — stored in WordPress (Bhairavi), shared across all sites and devices
+                        Manage allowed IP addresses — stored in WordPress, shared across all sites and devices
                     </p>
                 </div>
                 <div className="flex gap-2 items-center flex-wrap justify-end">
@@ -592,13 +592,12 @@ export default function IPSecurityPage() {
                             {logs.slice(0, 50).map((log, index) => (
                                 <div
                                     key={log.id || index}
-                                    className={`p-3 rounded-lg border text-sm ${
-                                        isAlertLog(log)
-                                            ? 'border-destructive/50 bg-destructive/5'
-                                            : isWarningLog(log)
-                                                ? 'border-amber-300/50 bg-amber-50/50'
-                                                : 'border-border bg-muted/30'
-                                    }`}
+                                    className={`p-3 rounded-lg border text-sm ${isAlertLog(log)
+                                        ? 'border-destructive/50 bg-destructive/5'
+                                        : isWarningLog(log)
+                                            ? 'border-amber-300/50 bg-amber-50/50'
+                                            : 'border-border bg-muted/30'
+                                        }`}
                                 >
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-2">

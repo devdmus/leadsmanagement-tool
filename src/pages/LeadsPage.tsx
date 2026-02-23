@@ -107,8 +107,9 @@ export default function LeadsPage() {
         assignee: null,
       }));
 
-      // If Sales Person, only show assigned leads. Admin and Sales Manager see all.
-      if (profile && profile.role === 'sales_person') {
+      // Team members only see leads assigned to them
+      const teamRoles = ['sales_person', 'seo_person', 'client'];
+      if (profile && teamRoles.includes(profile.role)) {
         mapped = mapped.filter(l => l.assigned_to === profile.id);
       }
 

@@ -238,6 +238,12 @@ export default function LeadsPageEnhanced() {
         assignee: allUsers.find(u => u.id === l.assigned_to) || null,
       }));
 
+      // Team member filter: only show leads assigned to current user
+      const teamRoles = ['sales_person', 'seo_person', 'client'];
+      if (profile && teamRoles.includes(profile.role)) {
+        filteredData = filteredData.filter(lead => lead.assigned_to === profile.id);
+      }
+
       // Apply search filter
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
