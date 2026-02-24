@@ -75,8 +75,9 @@ export const wpLeadsApi = {
       const lid = lead.id.toString();
 
       // Normalize source (fix potential backend typo)
-      let source = lead.source || 'website';
-      if (source === 'webisite') source = 'website';
+      let source = (lead.source || 'form').toLowerCase();
+      if (source.includes('website') || source === 'webisite') source = 'form';
+      if (source.includes('form')) source = 'form';
 
       const normalizedLead = {
         ...lead,
@@ -95,6 +96,38 @@ export const wpLeadsApi = {
   },
 
   async getById(id: string) {
+    const API_BASE = getApiBase();
+    const API_KEY = getApiKey();
+
+    try {
+      const res = await fetch(`${API_BASE}/leads/${id}?api_key=${API_KEY}&_=${Date.now()}`);
+      if (res.ok) {
+        const lead = await res.json();
+
+        let source = (lead.source || 'form').toLowerCase();
+        if (source.includes('website') || source === 'webisite') source = 'form';
+        if (source.includes('form')) source = 'form';
+
+        const localUpdates = getLocalUpdates();
+        const lid = id.toString();
+        const normalizedLead = {
+          ...lead,
+          id: lid,
+          source,
+          status: lead.status || 'pending',
+          assigned_to: lead.assigned_to ? lead.assigned_to.toString() : null,
+          created_at: lead.created_at || new Date().toISOString()
+        };
+
+        if (localUpdates[lid]) {
+          return { ...normalizedLead, ...localUpdates[lid] };
+        }
+        return normalizedLead;
+      }
+    } catch (e) {
+      console.error('Direct getById failed, falling back to getAll', e);
+    }
+
     const leads = await this.getAll();
     const lead = leads.find((l: any) => l.id.toString() === id.toString());
     if (!lead) throw new Error('Lead not found');
