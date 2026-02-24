@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { wpLeadsApi } from '@/db/wpLeadsApi';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Users, CheckCircle, UserRoundCheck , AlertCircle, TriangleAlert, BellRing } from 'lucide-react';
+import { Users, CheckCircle, UserRoundCheck, AlertCircle, TriangleAlert, BellRing } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useSite } from '@/contexts/SiteContext';
 
@@ -16,13 +16,7 @@ export default function DashboardPage() {
     pending: number;
     completed: number;
     remainder: number;
-    bySource: {
-      facebook: number;
-      linkedin: number;
-      form: number;
-      seo: number;
-      website: number;
-    };
+    bySource: Record<string, number>;
   } | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -37,16 +31,25 @@ export default function DashboardPage() {
 
       const stats = {
         total: data.length,
-        pending: data.filter((l: any) => l.status === 'pending').length,
-        completed: data.filter((l: any) => l.status === 'completed').length,
-        remainder: data.filter((l: any) => l.status === 'remainder').length,
-        bySource: {
-          facebook: data.filter((l: any) => l.source === 'facebook').length,
-          linkedin: data.filter((l: any) => l.source === 'linkedin').length,
-          form: data.filter((l: any) => l.source === 'form').length,
-          seo: data.filter((l: any) => l.source === 'seo').length,
-          website: data.filter((l: any) => l.source === 'website').length,
-        }
+        pending: data.filter((l: any) => (l.status || '').toLowerCase() === 'pending').length,
+        completed: data.filter((l: any) => (l.status || '').toLowerCase() === 'completed').length,
+        remainder: data.filter((l: any) => (l.status || '').toLowerCase() === 'remainder').length,
+        bySource: data.reduce((acc: Record<string, number>, l: any) => {
+          let s = (l.source || 'form').toLowerCase();
+          if (s.includes('form') || s.includes('website') || s === 'webisite') s = 'Form';
+          else if (s === 'facebook') s = 'Facebook';
+          else if (s === 'linkedin') s = 'LinkedIn';
+          else if (s === 'seo') s = 'SEO';
+          else s = s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' ');
+
+          acc[s] = (acc[s] || 0) + 1;
+          return acc;
+        }, {
+          Facebook: 0,
+          LinkedIn: 0,
+          Form: 0,
+          SEO: 0,
+        } as Record<string, number>)
       };
 
       setStats(stats);
@@ -57,13 +60,10 @@ export default function DashboardPage() {
     }
   };
 
-  const sourceData = stats ? [
-    { name: 'Facebook', value: stats.bySource.facebook },
-    { name: 'LinkedIn', value: stats.bySource.linkedin },
-    { name: 'Form', value: stats.bySource.form },
-    { name: 'SEO', value: stats.bySource.seo },
-    { name: 'Website', value: stats.bySource.website },
-  ] : [];
+  const sourceData = stats ? Object.entries(stats.bySource).map(([name, value]) => ({
+    name,
+    value
+  })) : [];
 
   const statusData = stats ? [
     { name: 'Pending', value: stats.pending },
@@ -132,7 +132,7 @@ export default function DashboardPage() {
         <Card className="hover:shadow-lg transition-shadow">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Completed</CardTitle>
-            <UserRoundCheck  className="h-8 w-8 text-success" />
+            <UserRoundCheck className="h-8 w-8 text-success" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-success">{stats?.completed || 0}</div>
@@ -145,7 +145,7 @@ export default function DashboardPage() {
         <Card className="hover:shadow-lg transition-shadow">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Reminder</CardTitle>
-            <BellRing  className="h-8 w-8 text-info" />
+            <BellRing className="h-8 w-8 text-info" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-info">{stats?.remainder || 0}</div>
