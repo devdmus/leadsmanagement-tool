@@ -18,6 +18,31 @@ export const superAdminApi = {
     }>;
   },
 
+  async logout(token: string) {
+    try {
+      await fetch(`${API_BASE}/auth/logout`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch {
+      // Don't throw - logout should succeed client-side even if server fails
+      console.warn('Server logout failed');
+    }
+  },
+
+  async checkSessionValid(token: string): Promise<boolean> {
+    try {
+      const res = await fetch(`${API_BASE}/auth/session-valid`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+      return data.valid === true;
+    } catch {
+      return true; // If server unreachable, don't kick user out
+    }
+  },
+
   async getMe(token: string) {
     const res = await fetch(`${API_BASE}/auth/me`, {
       headers: { Authorization: `Bearer ${token}` },

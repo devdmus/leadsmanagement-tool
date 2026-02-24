@@ -107,25 +107,36 @@ export function createWordPressApi(wpBaseUrl: string, authHeader: Record<string,
   return {
     // ── Posts ───────────────────────────────────────────────
     async getAllPosts() {
-      // Fetch all statuses, not just published
-      // brought all the data from the wordpress api
+      // Try fetching all statuses (requires authentication with edit_posts capability)
       const res = await fetch(
         `${WP_BASE_URL}/posts?_embed&per_page=100&status=publish,draft,private,pending,future&orderby=date&order=desc`,
         { headers: AUTH_HEADER }
       );
 
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error('WordPress API Error:', {
-          status: res.status,
-          statusText: res.statusText,
-          url: res.url,
-          response: errorText,
-        });
-        throw new Error(`Failed to fetch posts: ${res.status} ${res.statusText}`);
+      if (res.ok) {
+        return res.json();
       }
 
-      return res.json();
+      // If auth is insufficient for non-published statuses, fallback to published-only
+      if (res.status === 400 || res.status === 401 || res.status === 403) {
+        console.warn('Cannot fetch all post statuses (auth insufficient), falling back to published posts only');
+        const fallbackRes = await fetch(
+          `${WP_BASE_URL}/posts?_embed&per_page=100&status=publish&orderby=date&order=desc`,
+          { headers: AUTH_HEADER }
+        );
+        if (fallbackRes.ok) {
+          return fallbackRes.json();
+        }
+      }
+
+      const errorText = await res.text();
+      console.error('WordPress API Error:', {
+        status: res.status,
+        statusText: res.statusText,
+        url: res.url,
+        response: errorText,
+      });
+      throw new Error(`Failed to fetch posts: ${res.status} ${res.statusText}`);
     },
 
     async getPost(id: number) {
