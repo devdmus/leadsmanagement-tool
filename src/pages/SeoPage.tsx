@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { seoMetaTagsApi, activityLogsApi, profilesApi, bulkOperations } from '@/db/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { useWordPressApi } from '@/hooks/useWordPressApi';
+import { useSite } from '@/contexts/SiteContext';
 import { Checkbox } from '@/components/ui/checkbox';
 import type { SeoMetaTag, Profile } from '../types/types';
 
@@ -83,6 +85,8 @@ export default function SeoPage() {
 
   const { profile, hasPermission, getWpAuthHeader } = useAuth();
   const { toast } = useToast();
+  const wordpressApi = useWordPressApi();
+  const { currentSite } = useSite();
 
   const [formData, setFormData] = useState({
     page_identifier: '',
@@ -96,7 +100,7 @@ export default function SeoPage() {
     if (profile) {
       loadTags();
     }
-  }, [profile?.id]); // Reload when profile changes
+  }, [profile?.id, currentSite?.id]); // Reload when profile or site changes
 
   const loadTags = async () => {
     try {
@@ -141,8 +145,9 @@ export default function SeoPage() {
     }
 
     try {
+      const wpBaseUrl = wordpressApi.getBaseUrl();
       const response = await fetch(
-        `https://digitmarketus.com/Bhairavi/wp-json/wp/v2/${formDatanew.rest_base}/${formDatanew.post_id}`,
+        `${wpBaseUrl}/${formDatanew.rest_base}/${formDatanew.post_id}`,
         {
           method: "POST",
           headers: {
@@ -457,28 +462,21 @@ export default function SeoPage() {
   const ALLOWED_POST_TYPES = ["post", "page", "service", "sub-service", "healthcare"]
 
   useEffect(() => {
-    fetch("https://digitmarketus.com/Bhairavi/wp-json/wp/v2/types")
-      .then(res => res.json())
+    wordpressApi.getPostTypes()
       .then((data: Record<string, WPPostType>) => {
         const types = Object.keys(data)
           .filter(slug => ALLOWED_POST_TYPES.includes(slug))
           .map(slug => {
             const type = data[slug]
-
             return {
               slug,
-              name:
-                type.labels?.name ||
-                type.name ||
-                slug,
-              rest_base: type.rest_base || slug
+              name: type.labels?.name || type.name || slug,
+              rest_base: type.rest_base || slug,
             }
           })
-
-        //console.log("POST TYPES:", types)
         setPostTypes(types)
       })
-  }, [])
+  }, [currentSite?.id])
 
   useEffect(() => {
     if (!formDatanew.rest_base) {
@@ -486,10 +484,7 @@ export default function SeoPage() {
       return
     }
 
-    fetch(
-      `https://digitmarketus.com/Bhairavi/wp-json/wp/v2/${formDatanew.rest_base}?per_page=100`
-    )
-      .then(res => res.json())
+    wordpressApi.getPostsByType(formDatanew.rest_base)
       .then(data => {
         if (Array.isArray(data)) {
           setPosts(data)
@@ -498,7 +493,7 @@ export default function SeoPage() {
         }
       })
       .catch(() => setPosts([]))
-  }, [formDatanew.rest_base])
+  }, [formDatanew.rest_base, currentSite?.id])
 
   const usedPostIdsByType = tags.reduce<Record<string, Set<string>>>(
     (acc, tag) => {

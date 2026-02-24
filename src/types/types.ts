@@ -1,5 +1,5 @@
-export type UserRole = 'super_admin' | 'admin' | 'sales_manager' | 'sales_person' | 'seo_manager' | 'seo_person' | 'client';
-export type LeadSource = 'facebook' | 'linkedin' | 'form' | 'seo';
+export type UserRole = 'admin' | 'sales_manager' | 'sales_person' | 'seo_manager' | 'seo_person' | 'client';
+export type LeadSource = 'facebook' | 'linkedin' | 'form' | 'seo' | 'website' | 'website_contact' | (string & {});
 export type LeadStatus = 'pending' | 'completed' | 'remainder';
 
 export type Profile = {

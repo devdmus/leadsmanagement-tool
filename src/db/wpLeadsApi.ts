@@ -1,5 +1,47 @@
-const API_BASE = import.meta.env.VITE_API_BASE;
-const API_KEY = import.meta.env.VITE_WP_API_KEY;
+/**
+ * WP Leads API — site-aware version.
+ *
+ * Uses the current site's API base dynamically from localStorage
+ * (read from SiteContext's persisted state), falling back to VITE_API_BASE.
+ */
+
+const ENV_API_BASE = import.meta.env.VITE_API_BASE;
+const ENV_API_KEY = import.meta.env.VITE_WP_API_KEY;
+
+/**
+ * Derive the leads API base from the currently selected site.
+ *
+ * The leads plugin exposes a custom REST route at /wp-api on each site.
+ * For example, the default site uses the relative path "/wp-api".
+ * When a different site is selected, we prefix that site's URL to /wp-api.
+ */
+function getApiBase(): string {
+  try {
+    const currentSiteId = localStorage.getItem('crm_current_site_id');
+    const savedSites = localStorage.getItem('crm_wp_sites');
+    if (currentSiteId && savedSites) {
+      const sites = JSON.parse(savedSites);
+      const site = sites.find((s: any) => s.id === currentSiteId);
+      if (site?.url && !site.isDefault) {
+        // For non-default sites, we must hit the full URL.
+        // The custom CRM plugin endpoint is located at /wp-json/crm/v1 on the WordPress site.
+        // We cannot use /wp-api here because that is a local Vite proxy path.
+        let url = site.url.replace(/\/$/, '');
+        if (!url.includes('/wp-json')) url += '/wp-json';
+        return url + '/crm/v1';
+      }
+    }
+  } catch {
+    // fall through
+  }
+  // Default site or no site selected — use the env variable (/wp-api)
+  return ENV_API_BASE;
+}
+
+/** Get the API key (same for all sites for now). */
+function getApiKey(): string {
+  return ENV_API_KEY;
+}
 
 // Local persistent cache for leads (useful until WP backend is 100% ready)
 const getLocalUpdates = () => JSON.parse(localStorage.getItem('crm_leads_local_updates') || '{}');
@@ -11,26 +53,39 @@ const saveLocalUpdate = (id: string, data: any) => {
 
 export const wpLeadsApi = {
   async getAll() {
-    const res = await fetch(`${API_BASE}/leads`, {
-      headers: {
-        'X-API-KEY': API_KEY,
-      },
+    const API_BASE = getApiBase();
+    const API_KEY = getApiKey();
+
+    // Use query param instead of header to avoid CORS preflight issues with custom headers
+    const res = await fetch(`${API_BASE}/leads?api_key=${API_KEY}&_=${Date.now()}`, {
+      // No custom headers needed
     });
 
     if (!res.ok) {
-      throw new Error('Failed to fetch leads');
+      throw new Error('Failed to fetch leads: ' + res.status);
     }
 
     const remoteLeads = await res.json();
+    console.log(`[wpLeadsApi] Fetched ${remoteLeads.length} leads from ${API_BASE}`);
+
     const localUpdates = getLocalUpdates();
 
     // Merge remote data with local overrides and normalize IDs
     return remoteLeads.map((lead: any) => {
       const lid = lead.id.toString();
+
+      // Normalize source (fix potential backend typo)
+      let source = (lead.source || 'form').toLowerCase();
+      if (source.includes('website') || source === 'webisite') source = 'form';
+      if (source.includes('form')) source = 'form';
+
       const normalizedLead = {
         ...lead,
         id: lid,
-        assigned_to: lead.assigned_to ? lead.assigned_to.toString() : null
+        source,
+        status: lead.status || 'pending', // Default status if missing
+        assigned_to: lead.assigned_to ? lead.assigned_to.toString() : null,
+        created_at: lead.created_at || new Date().toISOString()
       };
 
       if (localUpdates[lid]) {
@@ -41,6 +96,38 @@ export const wpLeadsApi = {
   },
 
   async getById(id: string) {
+    const API_BASE = getApiBase();
+    const API_KEY = getApiKey();
+
+    try {
+      const res = await fetch(`${API_BASE}/leads/${id}?api_key=${API_KEY}&_=${Date.now()}`);
+      if (res.ok) {
+        const lead = await res.json();
+
+        let source = (lead.source || 'form').toLowerCase();
+        if (source.includes('website') || source === 'webisite') source = 'form';
+        if (source.includes('form')) source = 'form';
+
+        const localUpdates = getLocalUpdates();
+        const lid = id.toString();
+        const normalizedLead = {
+          ...lead,
+          id: lid,
+          source,
+          status: lead.status || 'pending',
+          assigned_to: lead.assigned_to ? lead.assigned_to.toString() : null,
+          created_at: lead.created_at || new Date().toISOString()
+        };
+
+        if (localUpdates[lid]) {
+          return { ...normalizedLead, ...localUpdates[lid] };
+        }
+        return normalizedLead;
+      }
+    } catch (e) {
+      console.error('Direct getById failed, falling back to getAll', e);
+    }
+
     const leads = await this.getAll();
     const lead = leads.find((l: any) => l.id.toString() === id.toString());
     if (!lead) throw new Error('Lead not found');
@@ -48,15 +135,18 @@ export const wpLeadsApi = {
   },
 
   async create(data: any) {
+    const API_BASE = getApiBase();
+    const API_KEY = getApiKey();
+
     console.log('🚀 Sending Create Request:', data);
-    const res = await fetch(`${API_BASE}/lead`, {
+    const res = await fetch(`${API_BASE}/lead?api_key=${API_KEY}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-API-KEY': API_KEY,
       },
       body: JSON.stringify(data),
     });
+
 
     if (!res.ok) {
       const err = await res.text();
@@ -68,6 +158,9 @@ export const wpLeadsApi = {
   },
 
   async update(id: string, data: any) {
+    const API_BASE = getApiBase();
+    const API_KEY = getApiKey();
+
     // 💾 Persist locally immediately (Optimistic UI fallback)
     saveLocalUpdate(id, data);
     console.log('💾 Saved update to local cache for ID:', id);
@@ -76,11 +169,10 @@ export const wpLeadsApi = {
 
     // Try the direct endpoint first
     try {
-      const res = await fetch(`${API_BASE}/lead/${id}`, {
+      const res = await fetch(`${API_BASE}/lead/${id}?api_key=${API_KEY}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-API-KEY': API_KEY,
         },
         body: JSON.stringify(data),
       });
@@ -90,11 +182,10 @@ export const wpLeadsApi = {
       console.warn('⚠️ Direct update failed, trying fallback to /lead');
 
       // Try fallback to main endpoint (passing ID in body)
-      const fallbackRes = await fetch(`${API_BASE}/lead`, {
+      const fallbackRes = await fetch(`${API_BASE}/lead?api_key=${API_KEY}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-API-KEY': API_KEY,
         },
         body: JSON.stringify({ ...data, id, action: 'update' }),
       });
@@ -112,6 +203,9 @@ export const wpLeadsApi = {
   },
 
   async delete(id: string) {
+    const API_BASE = getApiBase();
+    const API_KEY = getApiKey();
+
     console.log('🚀 Sending Delete Request:', id);
 
     // Also remove from local cache
@@ -119,11 +213,8 @@ export const wpLeadsApi = {
     delete updates[id];
     localStorage.setItem('crm_leads_local_updates', JSON.stringify(updates));
 
-    const res = await fetch(`${API_BASE}/lead/${id}`, {
+    const res = await fetch(`${API_BASE}/lead/${id}?api_key=${API_KEY}`, {
       method: 'DELETE',
-      headers: {
-        'X-API-KEY': API_KEY,
-      },
     });
 
     if (!res.ok) {

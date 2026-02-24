@@ -42,7 +42,7 @@ import {
 } from '@/components/ui/alert-dialog';
 
 type UserRole = 'admin' | 'sales' | 'seo' | 'client';
-type LeadSource = 'facebook' | 'linkedin' | 'form' | 'seo';
+type LeadSource = 'facebook' | 'linkedin' | 'form' | 'seo' | 'website' | 'website_contact' | string;
 type LeadStatus = 'pending' | 'completed' | 'remainder';
 
 type Profile = {
@@ -59,6 +59,7 @@ type Lead = {
   source: LeadSource;
   status: LeadStatus;
   assigned_to: string | null;
+  description?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -128,14 +129,12 @@ export default function LeadDetailPage() {
     if (!id) return;
 
     try {
-      const [leadsData, usersData, notesData, followUpsData] = await Promise.all([
-        leadsApi.getAll(),
+      const [leadData, usersData, notesData, followUpsData] = await Promise.all([
+        leadsApi.getById(id),
         profilesApi.getAll(),
         notesApi.getByLeadId(id),
         followUpsApi.getByLead(id),
       ]);
-
-      const leadData = leadsData.find((l: any) => l.id.toString() === id.toString());
 
       if (!leadData) {
         throw new Error('Lead not found');
@@ -171,58 +170,68 @@ export default function LeadDetailPage() {
       return;
     }
 
-    try {
-      const updateValue = value === 'unassigned' ? null : (value || null);
-      await leadsApi.update(id, { [field]: updateValue });
+    const updateValue = value === 'unassigned' ? null : (value || null);
 
-      if (profile) {
-        await activityLogsApi.create({
-          user_id: profile.id as string,
-          action: 'update_lead',
-          resource_type: 'lead',
-          resource_id: id,
-          details: { field, value },
-        });
+    // 1. Optimistic update and instant feedback prevents the user from feeling stuck
+    setLead((prev: any) => prev ? { ...prev, [field]: updateValue } : prev);
 
-        // Notify user and admins
-        await notificationHelper.notifyUserAndAdmins(
-          profile.id as string,
-          'Lead Updated',
-          `Lead "${lead?.name}" ${field} has been updated.`,
-          'success',
-          'lead_updated',
-          'lead',
-          id
-        );
+    toast({
+      title: 'Success',
+      description: `Lead ${field} updated successfully`,
+    });
 
-        // If assigning to someone, notify them
-        if (field === 'assigned_to' && updateValue) {
-          await notificationHelper.notifyUser(
-            updateValue,
-            'New Lead Assigned',
-            `You have been assigned to lead "${lead?.name}".`,
-            'info',
-            'lead_assigned',
-            'lead',
-            id
-          );
+    // 2. Perform the slow network requests in the background so the Select dropdown can close immediately
+    setTimeout(async () => {
+      try {
+        await leadsApi.update(id, { [field]: updateValue });
+
+        if (profile) {
+          try {
+            await activityLogsApi.create({
+              user_id: profile.id as string,
+              action: 'update_lead',
+              resource_type: 'lead',
+              resource_id: id,
+              details: { field, value },
+            });
+
+            await notificationHelper.notifyUserAndAdmins(
+              profile.id as string,
+              'Lead Updated',
+              `Lead "${lead?.name}" ${field} has been updated.`,
+              'success',
+              'lead_updated',
+              'lead',
+              id
+            );
+
+            if (field === 'assigned_to' && updateValue) {
+              await notificationHelper.notifyUser(
+                updateValue,
+                'New Lead Assigned',
+                `You have been assigned to lead "${lead?.name}".`,
+                'info',
+                'lead_assigned',
+                'lead',
+                id
+              );
+            }
+          } catch (logErr) {
+            console.warn('Logging side effects failed, but lead was updated', logErr);
+          }
         }
+
+        // Silently reload data to ensure sync with backend
+        loadData();
+      } catch (error) {
+        console.error('Failed to update lead on the backend:', error);
+        toast({
+          title: 'Warning',
+          description: 'Failed to sync update with the server. Data might revert.',
+          variant: 'destructive',
+        });
       }
-
-      toast({
-        title: 'Success',
-        description: `Lead ${field} updated successfully`,
-      });
-
-      loadData();
-    } catch (error) {
-      console.error('Failed to update lead:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to update lead',
-        variant: 'destructive',
-      });
-    }
+    }, 0);
   };
 
   const handleSaveNote = async () => {
@@ -651,7 +660,7 @@ export default function LeadDetailPage() {
 
             <div className="space-y-2">
               <Label>Source</Label>
-              <Badge>{lead.source}</Badge>
+              <Badge>{lead.source.replace(/_/g, ' ')}</Badge>
             </div>
 
             <div className="space-y-2">
@@ -671,6 +680,15 @@ export default function LeadDetailPage() {
                 </SelectContent>
               </Select>
             </div>
+
+            {lead.description && (
+              <div className="space-y-2 md:col-span-2 mt-4 mb-4">
+                <Label>Message / Description</Label>
+                <div className="p-4 bg-muted/50 rounded-lg text-sm whitespace-pre-wrap">
+                  {lead.description}
+                </div>
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label htmlFor="assigned_to">Assigned To</Label>

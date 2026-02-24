@@ -155,16 +155,9 @@ export function SiteProvider({ children }: { children: ReactNode }) {
 
     // Get sites accessible to a user based on their role
     const getAccessibleSites = (userId: string, userRole: string): WordPressSite[] => {
-        // Super admin sees all sites
-        if (userRole === 'super_admin') {
-            return sites;
-        }
-
-        // Admin sees only sites they are assigned to
+        // Admin sees all sites
         if (userRole === 'admin') {
-            return sites.filter(site =>
-                site.assignedAdmins?.includes(userId) || site.isDefault
-            );
+            return sites;
         }
 
         // Other users see only the current site (their assigned site)

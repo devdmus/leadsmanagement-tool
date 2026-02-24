@@ -5,6 +5,7 @@ import { bulkOperations, csvHelper } from '@/db/helpers';
 import { profilesApi, activityLogsApi, followUpsApi } from '@/db/api';
 import { socialIntegration } from '@/services/socialIntegration';
 import { useAuth } from '@/contexts/AuthContext';
+import { useSite } from '@/contexts/SiteContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -64,7 +65,7 @@ import {
 import { cn } from '@/lib/utils';
 
 type UserRole = 'admin' | 'sales' | 'seo' | 'client';
-type LeadSource = 'facebook' | 'linkedin' | 'form' | 'seo' | 'website';
+type LeadSource = 'facebook' | 'linkedin' | 'form' | 'seo' | 'website' | 'website_contact' | string;
 type LeadStatus = 'pending' | 'completed' | 'remainder';
 
 type Profile = {
@@ -146,6 +147,7 @@ export default function LeadsPageEnhanced() {
 
   const navigate = useNavigate();
   const { profile, hasPermission } = useAuth();
+  const { currentSite } = useSite();
   const { toast } = useToast();
 
 
@@ -214,7 +216,7 @@ export default function LeadsPageEnhanced() {
 
   useEffect(() => {
     loadLeads();
-  }, [currentPage, pageSize, searchQuery, statusFilter, sourceFilter, dateFilter]);
+  }, [currentPage, pageSize, searchQuery, statusFilter, sourceFilter, dateFilter, currentSite?.id]);
 
   const loadLeads = async () => {
     try {
@@ -248,12 +250,16 @@ export default function LeadsPageEnhanced() {
 
       // Apply status filter
       if (statusFilter !== 'all') {
-        filteredData = filteredData.filter(lead => lead.status === statusFilter);
+        filteredData = filteredData.filter(lead => (lead.status || '').toLowerCase() === statusFilter.toLowerCase());
       }
 
       // Apply source filter
       if (sourceFilter !== 'all') {
-        filteredData = filteredData.filter(lead => lead.source === sourceFilter);
+        filteredData = filteredData.filter(lead => {
+          const s = (lead.source || '').toLowerCase();
+          if (sourceFilter === 'form') return s.includes('form');
+          return s === sourceFilter.toLowerCase();
+        });
       }
 
       // Apply date filter
@@ -610,13 +616,15 @@ export default function LeadsPageEnhanced() {
       form: { icon: null, color: 'bg-green-500' },
       seo: { icon: null, color: 'bg-purple-500' },
       website: { icon: null, color: 'bg-slate-500' },
+      website_contact: { icon: null, color: 'bg-slate-600' },
     };
-    const item = config[source] || { icon: null, color: 'bg-muted' };
+    const key = (source as string).toLowerCase();
+    const item = config[key] || { icon: null, color: 'bg-slate-500' };
     const { icon: Icon, color } = item;
     return (
       <Badge className={cn(color, 'text-white')}>
         {Icon && <Icon className="h-3 w-3 mr-1" />}
-        {source}
+        {(source as string).replace(/_/g, ' ')}
       </Badge>
     );
   };
@@ -721,7 +729,7 @@ export default function LeadsPageEnhanced() {
               </SelectContent>
             </Select>
 
-            <Button
+            <Button className='self-end'
               variant="outline"
               onClick={() => {
                 setSearchQuery('');

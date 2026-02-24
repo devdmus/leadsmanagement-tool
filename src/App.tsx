@@ -10,7 +10,7 @@ import { RouteGuard } from '@/components/common/RouteGuard';
 import { IPSecurityGuard } from '@/components/common/IPSecurityGuard';
 import { AppLayout } from '@/components/layouts/AppLayout';
 import { Toaster } from '@/components/ui/toaster';
-import { ChatWidget } from '@/components/common/ChatWidget';
+// import { ChatWidget } from '@/components/common/ChatWidget';
 import 'react-quill/dist/quill.snow.css';
 
 function AppContent() {
@@ -45,7 +45,8 @@ function AppContent() {
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </AppLayout>
-          <ChatWidget />
+          {/* removed chat widget */}
+          {/* <ChatWidget /> */}
         </IPSecurityGuard>
       )}
       <Toaster />

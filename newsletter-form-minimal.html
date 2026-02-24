@@ -1,0 +1,31 @@
+<div class="unique-newsletter-form">
+    <input type="email" id="nl-email" placeholder="Email Address" required>
+    <button onclick="submitNewsletter()">Sign Me Up</button>
+</div>
+
+<script>
+    async function submitNewsletter() {
+        const email = document.getElementById('nl-email').value;
+        if (!email) return alert("Please enter email");
+
+        try {
+            const res = await fetch('/wp-json/crm/v1/lead', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email: email,
+                    name: 'Subscriber',
+                    source: 'newsletter',
+                    status: 'pending'
+                })
+            });
+
+            if (res.ok) {
+                alert("Subscribed!");
+                document.getElementById('nl-email').value = '';
+            } else {
+                alert("Error");
+            }
+        } catch (e) { console.error(e); }
+    }
+</script>

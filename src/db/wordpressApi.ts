@@ -1,6 +1,16 @@
-const WP_BASE_URL = 'https://digitmarketus.com/Bhairavi/wp-json/wp/v2';
+/**
+ * WordPress API — site-aware version.
+ *
+ * `createWordPressApi(siteBaseUrl, authHeaderValue)` returns an api object
+ * whose every call uses the given site URL and auth.
+ *
+ * The default export `wordpressApi` is still kept for backward compatibility
+ * but new code should use `createWordPressApi` via the `useWordPressApi` hook.
+ */
 
-const AUTH_HEADER = {
+// Fallback defaults (used by the legacy export)
+const DEFAULT_WP_BASE_URL = 'https://digitmarketus.com/Bhairavi/wp-json/wp/v2';
+const DEFAULT_AUTH_HEADER = {
   Authorization:
     'Basic ' +
     btoa('4ilwmh:syTRCaid5GHKm8xeWW1WeQ9X'),
@@ -59,367 +69,332 @@ async function convertImageToJPEG(file: File): Promise<File> {
   });
 }
 
-export const wordpressApi = {
-  /**
-   * Fetch all posts with embedded data (including all statuses)
-   */
-  async getAllPosts() {
-    // Fetch posts with all statuses: publish, draft, private, pending, future
-    const res = await fetch(
-      `${WP_BASE_URL}/posts?_embed&per_page=100&status=publish&orderby=date&order=desc`,
-      {
+// ─── Factory ──────────────────────────────────────────────────────────
+export function createWordPressApi(wpBaseUrl: string, authHeader: Record<string, string>) {
+  // Ensure the base ends with /wp/v2
+  let WP_BASE_URL = wpBaseUrl.replace(/\/+$/, '');
+  if (!WP_BASE_URL.endsWith('/wp/v2')) {
+    if (WP_BASE_URL.endsWith('/wp-json')) {
+      WP_BASE_URL += '/wp/v2';
+    } else {
+      WP_BASE_URL += '/wp-json/wp/v2';
+    }
+  }
+
+  // Derive the site root for custom endpoints (crm/v1)
+  // e.g. https://digitmarketus.com/Bhairavi/wp-json/wp/v2 → https://digitmarketus.com/Bhairavi/wp-json
+  const WP_JSON_BASE = WP_BASE_URL.replace(/\/wp\/v2$/, '');
+
+  const AUTH_HEADER = authHeader;
+
+  return {
+    // ── Posts ───────────────────────────────────────────────
+    async getAllPosts() {
+      // Fetch all statuses, not just published
+      // brought all the data from the wordpress api
+      const res = await fetch(
+        `${WP_BASE_URL}/posts?_embed&per_page=100&status=publish,draft,private,pending,future&orderby=date&order=desc`,
+        { headers: AUTH_HEADER }
+      );
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('WordPress API Error:', {
+          status: res.status,
+          statusText: res.statusText,
+          url: res.url,
+          response: errorText,
+        });
+        throw new Error(`Failed to fetch posts: ${res.status} ${res.statusText}`);
+      }
+
+      return res.json();
+    },
+
+    async getPost(id: number) {
+      const res = await fetch(`${WP_BASE_URL}/posts/${id}?_embed`, {
         headers: AUTH_HEADER,
-      }
-    );
-
-    if (!res.ok) {
-      const errorText = await res.text();
-      console.error('WordPress API Error:', {
-        status: res.status,
-        statusText: res.statusText,
-        url: res.url,
-        response: errorText
       });
-      throw new Error(`Failed to fetch posts: ${res.status} ${res.statusText}`);
-    }
+      if (!res.ok) throw new Error('Failed to fetch post');
+      return res.json();
+    },
 
-    return res.json();
-  },
+    async createPost(data: WordPressPost) {
+      const res = await fetch(`${WP_BASE_URL}/posts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...AUTH_HEADER },
+        body: JSON.stringify(data),
+      });
 
-  /**
-   * Fetch a single post by ID
-   */
-  async getPost(id: number) {
-    const res = await fetch(`${WP_BASE_URL}/posts/${id}?_embed`, {
-      headers: AUTH_HEADER,
-    });
-    if (!res.ok) throw new Error('Failed to fetch post');
-    return res.json();
-  },
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.message || 'Failed to create post');
+      }
+      return res.json();
+    },
 
-  /**
-   * Create a new post
-   */
-  async createPost(data: WordPressPost) {
-    const res = await fetch(`${WP_BASE_URL}/posts`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...AUTH_HEADER,
-      },
-      body: JSON.stringify(data),
-    });
+    async updatePost(id: number, data: Partial<WordPressPost>) {
+      const res = await fetch(`${WP_BASE_URL}/posts/${id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...AUTH_HEADER },
+        body: JSON.stringify(data),
+      });
 
-    if (!res.ok) {
-      const error = await res.json();
-      throw new Error(error.message || 'Failed to create post');
-    }
-    return res.json();
-  },
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.message || 'Failed to update post');
+      }
+      return res.json();
+    },
 
-  /**
-   * Update an existing post
-   */
-  async updatePost(id: number, data: Partial<WordPressPost>) {
-    const res = await fetch(`${WP_BASE_URL}/posts/${id}`, {
-      method: 'POST', // WordPress uses POST for updates
-      headers: {
-        'Content-Type': 'application/json',
-        ...AUTH_HEADER,
-      },
-      body: JSON.stringify(data),
-    });
+    async deletePost(id: number, force: boolean = false) {
+      const res = await fetch(`${WP_BASE_URL}/posts/${id}${force ? '?force=true' : ''}`, {
+        method: 'DELETE',
+        headers: AUTH_HEADER,
+      });
 
-    if (!res.ok) {
-      const error = await res.json();
-      throw new Error(error.message || 'Failed to update post');
-    }
-    return res.json();
-  },
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.message || 'Failed to delete post');
+      }
+      return res.json();
+    },
 
-  /**
-   * Delete a post (moves to trash by default)
-   */
-  async deletePost(id: number, force: boolean = false) {
-    const res = await fetch(`${WP_BASE_URL}/posts/${id}${force ? '?force=true' : ''}`, {
-      method: 'DELETE',
-      headers: AUTH_HEADER,
-    });
+    // ── Media ──────────────────────────────────────────────
+    async uploadMedia(file: File): Promise<{ id: number; url: string }> {
+      const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+      if (!allowedTypes.includes(file.type)) {
+        throw new Error('Please upload a JPEG, PNG, GIF, or WebP image');
+      }
 
-    if (!res.ok) {
-      const error = await res.json();
-      throw new Error(error.message || 'Failed to delete post');
-    }
-    return res.json();
-  },
+      let fileToUpload = file;
 
-  /**
-   * Upload media/image to WordPress with automatic JPEG conversion fallback
-   */
-  async uploadMedia(file: File): Promise<{ id: number; url: string }> {
-    // Validate file type
-    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-    if (!allowedTypes.includes(file.type)) {
-      throw new Error('Please upload a JPEG, PNG, GIF, or WebP image');
-    }
-
-    let fileToUpload = file;
-
-    // Try uploading the original file first
-    try {
-      const result = await this.doUpload(fileToUpload);
-      return result;
-    } catch (error: any) {
-      // If image processing fails and it's not already a JPEG, try converting
-      if (
-        error.message.includes('responsive image sizes') ||
-        error.message.includes('image processing') ||
-        error.code === 'rest_upload_image_error'
-      ) {
-        console.log('Converting image to JPEG and retrying...');
-
-        try {
-          fileToUpload = await convertImageToJPEG(file);
-          const result = await this.doUpload(fileToUpload);
-          return result;
-        } catch (conversionError: any) {
-          throw new Error('Failed to upload image even after conversion. Please try a different image.');
+      try {
+        const result = await this.doUpload(fileToUpload);
+        return result;
+      } catch (error: any) {
+        if (
+          error.message.includes('responsive image sizes') ||
+          error.message.includes('image processing') ||
+          error.code === 'rest_upload_image_error'
+        ) {
+          console.log('Converting image to JPEG and retrying...');
+          try {
+            fileToUpload = await convertImageToJPEG(file);
+            const result = await this.doUpload(fileToUpload);
+            return result;
+          } catch (_conversionError: any) {
+            throw new Error('Failed to upload image even after conversion. Please try a different image.');
+          }
         }
+        throw error;
+      }
+    },
+
+    async doUpload(file: File): Promise<{ id: number; url: string }> {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('title', file.name.replace(/\.[^/.]+$/, ''));
+
+      const res = await fetch(`${WP_BASE_URL}/media`, {
+        method: 'POST',
+        headers: { Authorization: AUTH_HEADER.Authorization },
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => null);
+        if (errorData?.code === 'rest_upload_image_error') {
+          const err: any = new Error(errorData.message || 'Image processing failed');
+          err.code = 'rest_upload_image_error';
+          throw err;
+        }
+        if (errorData?.code === 'rest_upload_file_type_not_allowed') {
+          throw new Error('This file type is not allowed. Please use JPEG, PNG, GIF, or WebP.');
+        }
+        if (errorData?.code === 'rest_upload_user_quota_exceeded') {
+          throw new Error('Upload quota exceeded. Please contact administrator.');
+        }
+        throw new Error(errorData?.message || 'Failed to upload media');
       }
 
-      throw error;
-    }
-  },
+      const media = await res.json();
+      return { id: media.id, url: media.source_url };
+    },
 
-  /**
-   * Internal method to perform the actual upload
-   */
-  async doUpload(file: File): Promise<{ id: number; url: string }> {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('title', file.name.replace(/\.[^/.]+$/, ''));
-
-    const res = await fetch(`${WP_BASE_URL}/media`, {
-      method: 'POST',
-      headers: {
-        Authorization: AUTH_HEADER.Authorization,
-      },
-      body: formData,
-    });
-
-    if (!res.ok) {
-      const errorData = await res.json().catch(() => null);
-
-      if (errorData?.code === 'rest_upload_image_error') {
-        const err: any = new Error(errorData.message || 'Image processing failed');
-        err.code = 'rest_upload_image_error';
-        throw err;
+    async deleteMedia(id: number, force: boolean = true) {
+      const res = await fetch(`${WP_BASE_URL}/media/${id}${force ? '?force=true' : ''}`, {
+        method: 'DELETE',
+        headers: AUTH_HEADER,
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.message || 'Failed to delete media');
       }
+      return res.json();
+    },
 
-      if (errorData?.code === 'rest_upload_file_type_not_allowed') {
-        throw new Error('This file type is not allowed. Please use JPEG, PNG, GIF, or WebP.');
+    // ── Categories ─────────────────────────────────────────
+    async getCategories() {
+      const res = await fetch(`${WP_BASE_URL}/categories?per_page=100`);
+      if (!res.ok) throw new Error('Failed to fetch categories');
+      return res.json();
+    },
+
+    async getOrCreateCategory(name: string): Promise<number> {
+      const categories = await this.getCategories();
+      const existing = categories.find(
+        (cat: any) => cat.name.toLowerCase() === name.toLowerCase()
+      );
+      if (existing) return existing.id;
+
+      const res = await fetch(`${WP_BASE_URL}/categories`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...AUTH_HEADER },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.message || 'Failed to create category');
       }
+      const newCategory = await res.json();
+      return newCategory.id;
+    },
 
-      if (errorData?.code === 'rest_upload_user_quota_exceeded') {
-        throw new Error('Upload quota exceeded. Please contact administrator.');
+    // ── Tags ───────────────────────────────────────────────
+    async getTags() {
+      const res = await fetch(`${WP_BASE_URL}/tags?per_page=100`);
+      if (!res.ok) throw new Error('Failed to fetch tags');
+      return res.json();
+    },
+
+    async getOrCreateTag(name: string): Promise<number> {
+      const tags = await this.getTags();
+      const existing = tags.find(
+        (tag: any) => tag.name.toLowerCase() === name.toLowerCase()
+      );
+      if (existing) return existing.id;
+
+      const res = await fetch(`${WP_BASE_URL}/tags`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...AUTH_HEADER },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.message || 'Failed to create tag');
       }
+      const newTag = await res.json();
+      return newTag.id;
+    },
 
-      throw new Error(errorData?.message || 'Failed to upload media');
-    }
+    async getOrCreateTags(tagNames: string[]): Promise<number[]> {
+      const tagIds = await Promise.all(tagNames.map((name) => this.getOrCreateTag(name)));
+      return tagIds;
+    },
 
-    const media = await res.json();
-    return {
-      id: media.id,
-      url: media.source_url,
-    };
-  },
+    // ── Users ──────────────────────────────────────────────
+    async getUsers(role?: string, customHeaders?: Record<string, string>) {
+      let url = `${WP_BASE_URL}/users?per_page=100&context=edit`;
+      if (role) url += `&roles=${role}`;
 
-  /**
-   * Delete media
-   */
-  async deleteMedia(id: number, force: boolean = true) {
-    const res = await fetch(`${WP_BASE_URL}/media/${id}${force ? '?force=true' : ''}`, {
-      method: 'DELETE',
-      headers: AUTH_HEADER,
-    });
+      const res = await fetch(url, { headers: customHeaders || AUTH_HEADER });
+      if (!res.ok) throw new Error('Failed to fetch users');
+      return res.json();
+    },
 
-    if (!res.ok) {
-      const error = await res.json();
-      throw new Error(error.message || 'Failed to delete media');
-    }
-    return res.json();
-  },
+    async createUser(data: any) {
+      const res = await fetch(`${WP_BASE_URL}/users`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...AUTH_HEADER },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.message || 'Failed to create user');
+      }
+      return res.json();
+    },
 
-  /**
-   * Get all categories
-   */
-  async getCategories() {
-    const res = await fetch(`${WP_BASE_URL}/categories?per_page=100`);
-    if (!res.ok) throw new Error('Failed to fetch categories');
-    return res.json();
-  },
+    async updateUser(id: number, data: any) {
+      const res = await fetch(`${WP_BASE_URL}/users/${id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...AUTH_HEADER },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.message || 'Failed to update user');
+      }
+      return res.json();
+    },
 
-  /**
-   * Create or get category by name
-   */
-  async getOrCreateCategory(name: string): Promise<number> {
-    // First, try to find existing category
-    const categories = await this.getCategories();
-    const existing = categories.find(
-      (cat: any) => cat.name.toLowerCase() === name.toLowerCase()
-    );
+    async deleteUser(id: number, reassignId?: number) {
+      let url = `${WP_BASE_URL}/users/${id}?force=true`;
+      if (reassignId) url += `&reassign=${reassignId}`;
 
-    if (existing) {
-      return existing.id;
-    }
+      const res = await fetch(url, { method: 'DELETE', headers: AUTH_HEADER });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.message || 'Failed to delete user');
+      }
+      return res.json();
+    },
 
-    // Create new category
-    const res = await fetch(`${WP_BASE_URL}/categories`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...AUTH_HEADER,
-      },
-      body: JSON.stringify({ name }),
-    });
+    // ── Custom endpoints (crm/v1) ─────────────────────────
+    async logActivity(action: string, details: string, customHeaders?: Record<string, string>) {
+      const res = await fetch(`${WP_JSON_BASE}/crm/v1/log`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(customHeaders || AUTH_HEADER),
+        },
+        body: JSON.stringify({ action, details }),
+      });
 
-    if (!res.ok) {
-      const error = await res.json();
-      throw new Error(error.message || 'Failed to create category');
-    }
+      if (!res.ok) {
+        console.warn('Failed to log activity:', await res.text());
+      }
+    },
 
-    const newCategory = await res.json();
-    return newCategory.id;
-  },
+    async getActivityLogs(page: number = 1, customHeaders?: Record<string, string>) {
+      const res = await fetch(`${WP_JSON_BASE}/crm/v1/logs?page=${page}`, {
+        headers: customHeaders || AUTH_HEADER,
+      });
 
-  /**
-   * Get all tags
-   */
-  async getTags() {
-    const res = await fetch(`${WP_BASE_URL}/tags?per_page=100`);
-    if (!res.ok) throw new Error('Failed to fetch tags');
-    return res.json();
-  },
+      if (!res.ok) {
+        if (res.status === 403) throw new Error('You do not have permission to view logs');
+        throw new Error('Failed to fetch activity logs');
+      }
+      return res.json();
+    },
 
-  /**
-   * Create or get tag by name
-   */
-  async getOrCreateTag(name: string): Promise<number> {
-    // First, try to find existing tag
-    const tags = await this.getTags();
-    const existing = tags.find(
-      (tag: any) => tag.name.toLowerCase() === name.toLowerCase()
-    );
+    // ── Post Types (for SEO page) ─────────────────────────
+    async getPostTypes() {
+      const res = await fetch(`${WP_BASE_URL}/types`);
+      if (!res.ok) throw new Error('Failed to fetch post types');
+      return res.json();
+    },
 
-    if (existing) {
-      return existing.id;
-    }
+    async getPostsByType(restBase: string) {
+      const res = await fetch(`${WP_BASE_URL}/${restBase}?per_page=100`);
+      if (!res.ok) throw new Error('Failed to fetch posts by type');
+      return res.json();
+    },
 
-    // Create new tag
-    const res = await fetch(`${WP_BASE_URL}/tags`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...AUTH_HEADER,
-      },
-      body: JSON.stringify({ name }),
-    });
+    /** Expose the base url for niche usage */
+    getBaseUrl() {
+      return WP_BASE_URL;
+    },
 
-    if (!res.ok) {
-      const error = await res.json();
-      throw new Error(error.message || 'Failed to create tag');
-    }
+    getJsonBase() {
+      return WP_JSON_BASE;
+    },
+  };
+}
 
-    const newTag = await res.json();
-    return newTag.id;
-  },
-
-  async getOrCreateTags(tagNames: string[]): Promise<number[]> {
-    const tagIds = await Promise.all(
-      tagNames.map(name => this.getOrCreateTag(name))
-    );
-    return tagIds;
-  },
-
-  /**
-   * Get all users
-   */
-  async getUsers(role?: string) {
-    let url = `${WP_BASE_URL}/users?per_page=100`;
-    if (role) {
-      url += `&roles=${role}`;
-    }
-
-    const res = await fetch(url, {
-      headers: AUTH_HEADER,
-    });
-
-    if (!res.ok) {
-      // If 401/403, might be permissions. Return empty list or throw depending on strictness.
-      // For now, let's throw to be visible.
-      throw new Error('Failed to fetch users');
-    }
-    return res.json();
-  },
-
-  /**
-   * Create a new user
-   */
-  async createUser(data: any) {
-    const res = await fetch(`${WP_BASE_URL}/users`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...AUTH_HEADER,
-      },
-      body: JSON.stringify(data),
-    });
-
-    if (!res.ok) {
-      const error = await res.json();
-      throw new Error(error.message || 'Failed to create user');
-    }
-    return res.json();
-  },
-
-  /**
-   * Update a user
-   */
-  async updateUser(id: number, data: any) {
-    const res = await fetch(`${WP_BASE_URL}/users/${id}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...AUTH_HEADER,
-      },
-      body: JSON.stringify(data),
-    });
-
-    if (!res.ok) {
-      const error = await res.json();
-      throw new Error(error.message || 'Failed to update user');
-    }
-    return res.json();
-  },
-
-  /**
-   * Delete a user
-   */
-  async deleteUser(id: number, reassignId?: number) {
-    let url = `${WP_BASE_URL}/users/${id}?force=true`;
-    if (reassignId) {
-      url += `&reassign=${reassignId}`;
-    }
-
-    const res = await fetch(url, {
-      method: 'DELETE',
-      headers: AUTH_HEADER,
-    });
-
-    if (!res.ok) {
-      const error = await res.json();
-      throw new Error(error.message || 'Failed to delete user');
-    }
-    return res.json();
-  },
-};
+// ─── Legacy default export (backward compat) ────────────────────────────
+export const wordpressApi = createWordPressApi(
+  DEFAULT_WP_BASE_URL,
+  DEFAULT_AUTH_HEADER
+);

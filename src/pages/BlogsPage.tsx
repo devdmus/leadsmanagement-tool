@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { activityLogsApi, profilesApi, bulkOperations } from '@/db/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { notificationHelper } from '@/lib/notificationHelper';
@@ -8,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Select,
   SelectContent,
@@ -23,6 +25,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -52,9 +62,11 @@ import {
   Filter,
   FolderPlus,
   Tag as TagIcon,
-  UserPlus
+  UserPlus,
+  MoreVertical,
 } from 'lucide-react';
-import { wordpressApi } from '@/db/wordpressApi';
+import { useWordPressApi } from '@/hooks/useWordPressApi';
+import { useSite } from '@/contexts/SiteContext';
 import {
   Table,
   TableBody,
@@ -158,10 +170,13 @@ export default function BlogsPage() {
 
   const { profile } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
+  const wordpressApi = useWordPressApi();
+  const { currentSite } = useSite();
 
   useEffect(() => {
     loadInitialData();
-  }, []);
+  }, [currentSite?.id]);
 
   const loadInitialData = async () => {
     await Promise.all([loadBlogs(), loadCategories(), loadTags(), loadUsers()]);
@@ -263,7 +278,7 @@ export default function BlogsPage() {
 
     setCreatingCategory(true);
     try {
-      //const categoryId = await wordpressApi.getOrCreateCategory(newCategoryName);
+      await wordpressApi.getOrCreateCategory(newCategoryName.trim());
       toast({
         title: 'Success',
         description: `Category "${newCategoryName}" created successfully`,
@@ -295,7 +310,7 @@ export default function BlogsPage() {
 
     setCreatingTag(true);
     try {
-      //const tagId = await wordpressApi.getOrCreateTag(newTagName);
+      await wordpressApi.getOrCreateTag(newTagName.trim());
       toast({
         title: 'Success',
         description: `Tag "${newTagName}" created successfully`,
@@ -625,24 +640,6 @@ export default function BlogsPage() {
     }
   };
 
-  const openEditDialog = (blog: Blog) => {
-    setEditingBlog(blog);
-    setFormData({
-      title: blog.title,
-      description: blog.description,
-      content: blog.content || '',
-      feature_image: blog.feature_image || '',
-      feature_image_id: blog.feature_image_id,
-      category: blog.category,
-      category_id: blog.category_id,
-      tags: blog.tags,
-      tag_ids: blog.tag_ids,
-
-      status: blog.status,
-      assigned_to: (blog as any).assigned_to || 'unassigned',
-    });
-    setShowDialog(true);
-  };
 
   const openNewDialog = () => {
     setEditingBlog(null);
@@ -711,10 +708,14 @@ export default function BlogsPage() {
       </Badge>
     );
   };
+  // added filtering logic for blogs based on status and category
 
   // Filter blogs
+  // Normalize status for filtering (WordPress statuses: draft, private, pending, future, publish)
   const filteredBlogs = blogs.filter(blog => {
-    const matchesStatus = statusFilter === 'all' || blog.status === statusFilter;
+    const matchesStatus =
+      statusFilter === 'all' ||
+      blog.status === statusFilter;
     const matchesCategory = categoryFilter === 'all' || blog.category === categoryFilter;
     return matchesStatus && matchesCategory;
   });
@@ -771,205 +772,220 @@ export default function BlogsPage() {
         </Button>
       </div>
 
+      {/* Table Card with filters in header */}
+      <Card className="hover:shadow-lg transition-shadow">
+        <CardHeader className="pb-4">
+          <div className="flex flex-wrap gap-4 items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <Filter className="h-4 w-4 text-muted-foreground" />
+              All Posts
+            </CardTitle>
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2">
+                <Label htmlFor="status-filter" className="text-sm whitespace-nowrap">Status:</Label>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger id="status-filter" className="w-[140px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="publish">Published</SelectItem>
+                    <SelectItem value="draft">Draft</SelectItem>
+                    <SelectItem value="private">Private</SelectItem>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="future">Scheduled</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-4 items-center bg-muted/50 p-4 rounded-lg">
-        <div className="flex items-center gap-2">
-          <Filter className="h-4 w-4 text-muted-foreground" />
-          <span className="text-sm font-medium">Filters:</span>
-        </div>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="category-filter" className="text-sm whitespace-nowrap">Category:</Label>
+                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                  <SelectTrigger id="category-filter" className="w-[140px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Categories</SelectItem>
+                    {categories.map((cat) => (
+                      <SelectItem key={cat.id} value={cat.name}>
+                        {cat.name} ({cat.count})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-        <div className="flex items-center gap-2">
-          <Label htmlFor="status-filter" className="text-sm">Status:</Label>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger id="status-filter" className="w-[140px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Status</SelectItem>
-              <SelectItem value="publish">Published</SelectItem>
-              <SelectItem value="draft">Draft</SelectItem>
-              <SelectItem value="private">Private</SelectItem>
-              <SelectItem value="pending">Pending</SelectItem>
-              <SelectItem value="future">Scheduled</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Label htmlFor="category-filter" className="text-sm">Category:</Label>
-          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger id="category-filter" className="w-[140px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Categories</SelectItem>
-              {categories.map((cat) => (
-                <SelectItem key={cat.id} value={cat.name}>
-                  {cat.name} ({cat.count})
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="ml-auto text-sm text-muted-foreground">
-          Showing {filteredBlogs.length} of {blogs.length} posts
-        </div>
-      </div>
-
-      {
-        filteredBlogs.length === 0 ? (
-          <div className="text-center py-12 border rounded-lg">
-            <p className="text-muted-foreground mb-4">
-              {blogs.length === 0 ? 'No blogs found' : 'No blogs match your filters'}
-            </p>
-            {blogs.length === 0 ? (
-              <Button onClick={openNewDialog}>Create Your First Blog</Button>
-            ) : (
-              <Button variant="outline" onClick={() => {
-                setStatusFilter('all');
-                setCategoryFilter('all');
-              }}>
-                Clear Filters
-              </Button>
-            )}
+              <span className="text-sm text-muted-foreground">
+                Showing {filteredBlogs.length} of {blogs.length} posts
+              </span>
+            </div>
           </div>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[50px]">
-                  <Checkbox
-                    checked={selectedBlogs.length === filteredBlogs.length && filteredBlogs.length > 0}
-                    onCheckedChange={handleSelectAll}
-                  />
-                </TableHead>
-                <TableHead>Title</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Tags</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Author</TableHead>
-                <TableHead>Assigned To</TableHead>
-                <TableHead>Published</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
+        </CardHeader>
 
-            <TableBody>
-              {filteredBlogs.map((blog) => (
-                <TableRow key={blog.id}>
-                  <TableCell>
-                    <Checkbox
-                      checked={selectedBlogs.includes(blog.id)}
-                      onCheckedChange={(checked) => handleSelectBlog(blog.id, checked as boolean)}
-                    />
-                  </TableCell>
-                  <TableCell className="font-medium max-w-md">
-                    <div className="flex items-center gap-2">
-                      {blog.feature_image && (
-                        <img
-                          src={blog.feature_image}
-                          alt=""
-                          className="w-10 h-10 rounded object-cover"
+        <CardContent className="p-0">
+          {filteredBlogs.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-muted-foreground mb-4">
+                {blogs.length === 0 ? 'No blogs found' : 'No blogs match your filters'}
+              </p>
+              {blogs.length === 0 ? (
+                <Button onClick={openNewDialog}>Create Your First Blog</Button>
+              ) : (
+                <Button variant="outline" onClick={() => {
+                  setStatusFilter('all');
+                  setCategoryFilter('all');
+                }}>
+                  Clear Filters
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+
+              <Table className="w-full table-auto">
+                <TableHeader>
+                  <TableRow className="[&>th]:py-6 [&>th]:px-4">
+                    <TableHead className="w-10">
+                      <Checkbox
+                        checked={selectedBlogs.length === filteredBlogs.length && filteredBlogs.length > 0}
+                        onCheckedChange={handleSelectAll}
+                      />
+                    </TableHead>
+                    <TableHead className="min-w-[220px]">Title</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead>Tags</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Author</TableHead>
+                    <TableHead>Assigned To</TableHead>
+                    <TableHead>Published</TableHead>
+                    <TableHead className="w-10 text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+
+                <TableBody >
+                  {filteredBlogs.map((blog) => (
+                    <TableRow key={blog.id} className="hover:bg-muted/50 transition-colors [&>td]:px-4">
+                      <TableCell className="py-3">
+                        <Checkbox
+                          checked={selectedBlogs.includes(blog.id)}
+                          onCheckedChange={(checked) => handleSelectBlog(blog.id, checked as boolean)}
                         />
-                      )}
-                      <span className="truncate">{blog.title}</span>
-                    </div>
-                  </TableCell>
+                      </TableCell>
+                      <TableCell className="font-medium max-w-0 overflow-hidden py-3">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {blog.feature_image && (
+                            <img
+                              src={blog.feature_image}
+                              alt=""
+                              className="w-8 h-8 rounded object-cover flex-shrink-0"
+                            />
+                          )}
+                          <span className="truncate text-sm" title={blog.title}>{blog.title}</span>
+                        </div>
+                      </TableCell>
 
-                  <TableCell>
-                    <Badge variant="outline">{blog.category}</Badge>
-                  </TableCell>
+                      <TableCell className="py-3">
+                        <Badge variant="outline" className="text-xs truncate max-w-full">{blog.category}</Badge>
+                      </TableCell>
 
-                  <TableCell>
-                    <div className="flex flex-wrap gap-1">
-                      {blog.tags.slice(0, 2).map((tag, idx) => (
-                        <Badge key={idx} variant="secondary" className="text-xs">
-                          {tag}
-                        </Badge>
-                      ))}
-                      {blog.tags.length > 2 && (
-                        <Badge variant="secondary" className="text-xs">
-                          +{blog.tags.length - 2}
-                        </Badge>
-                      )}
-                    </div>
-                  </TableCell>
+                      <TableCell className="py-3">
+                        <div className="flex flex-wrap gap-1">
+                          {blog.tags.slice(0, 1).map((tag, idx) => (
+                            <Badge key={idx} variant="secondary" className="text-xs">
+                              {tag}
+                            </Badge>
+                          ))}
+                          {blog.tags.length > 1 && (
+                            <Badge variant="secondary" className="text-xs">
+                              +{blog.tags.length - 1}
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
 
-                  <TableCell>{getStatusBadge(blog.status)}</TableCell>
+                      <TableCell className="py-3">{getStatusBadge(blog.status)}</TableCell>
 
-                  <TableCell>{blog.author?.username || 'Admin'}</TableCell>
-                  <TableCell>
-                    {users.find(u => u.id === blog.assigned_to)?.username || 'Unassigned'}
-                  </TableCell>
+                      <TableCell className="text-sm truncate py-3">{blog.author?.username || 'Admin'}</TableCell>
+                      <TableCell className="text-sm truncate py-3">
+                        {users.find(u => u.id === blog.assigned_to)?.username || 'Unassigned'}
+                      </TableCell>
 
-                  <TableCell>
-                    {blog.published_at
-                      ? new Date(blog.published_at).toLocaleDateString()
-                      : '-'}
-                  </TableCell>
+                      <TableCell className="text-sm py-3">
+                        {blog.published_at
+                          ? new Date(blog.published_at).toLocaleDateString()
+                          : '-'}
+                      </TableCell>
 
-                  <TableCell className="text-right">
-                    <div className="flex gap-2 justify-end">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => openEditDialog(blog)}
-                      >
-                        <Edit className="h-4 w-4" />
-                      </Button>
+                      <TableCell className="py-3">
+                        <div className="flex justify-center">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button size="icon" variant="ghost" className="h-8 w-8">
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => navigate(`/blogs/${blog.id}`)}>
+                                <Edit className="mr-2 h-4 w-4" />
+                                Edit Blog
+                              </DropdownMenuItem>
+                              <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                  <DropdownMenuItem
+                                    className="text-destructive focus:text-destructive"
+                                    onSelect={(e) => e.preventDefault()}
+                                  >
+                                    <Trash2 className="mr-2 h-4 w-4" />
+                                    Delete Blog
+                                  </DropdownMenuItem>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                  <AlertDialogHeader>
+                                    <AlertDialogTitle>Delete Blog?</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                      This will permanently delete "{blog.title}" from WordPress.
+                                      This action cannot be undone.
+                                    </AlertDialogDescription>
+                                  </AlertDialogHeader>
+                                  <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction
+                                      onClick={() => handleDelete(blog.id, blog.title)}
+                                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                    >
+                                      Delete
+                                    </AlertDialogAction>
+                                  </AlertDialogFooter>
+                                </AlertDialogContent>
+                              </AlertDialog>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button size="sm" variant="destructive">
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </AlertDialogTrigger>
-
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Delete Blog?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              This will permanently delete "{blog.title}" from WordPress.
-                              This action cannot be undone.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction
-                              onClick={() => handleDelete(blog.id, blog.title)}
-                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                            >
-                              Delete
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )
-      }
-
-      {/* Blog Create/Edit Dialog */}
-      <Dialog open={showDialog} onOpenChange={setShowDialog}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
+      {/* Blog Create/Edit Sheet (Slide-in Panel) */}
+      <Sheet open={showDialog} onOpenChange={setShowDialog}>
+        <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto">
+          <SheetHeader className="mb-4">
+            <SheetTitle>
               {editingBlog ? 'Edit Blog Post' : 'Create New Blog Post'}
-            </DialogTitle>
-            <DialogDescription>
+            </SheetTitle>
+            <SheetDescription>
               {editingBlog
                 ? 'Update your blog post details'
                 : 'Fill in the details for your new blog post'}
-            </DialogDescription>
-          </DialogHeader>
+            </SheetDescription>
+          </SheetHeader>
 
-          <div className="space-y-4">
+          <div className="space-y-4 pb-6">
             <div>
               <Label htmlFor="title">
                 Title <span className="text-destructive">*</span>
@@ -982,6 +998,7 @@ export default function BlogsPage() {
                 }
                 placeholder="Enter blog title"
                 disabled={saving}
+                className="mt-1"
               />
             </div>
 
@@ -991,6 +1008,7 @@ export default function BlogsPage() {
               </Label>
               <Textarea
                 id="description"
+                className="mt-1"
                 value={formData.description}
                 onChange={(e) =>
                   setFormData({ ...formData, description: e.target.value })
@@ -1006,7 +1024,7 @@ export default function BlogsPage() {
 
             <div>
               <Label htmlFor="content">Full Content</Label>
-              <div className="border rounded-md overflow-hidden">
+              <div className="border rounded-md overflow-hidden mt-1">
                 <ReactQuill
                   theme="snow"
                   value={formData.content}
@@ -1030,13 +1048,13 @@ export default function BlogsPage() {
 
             <div>
               <Label>Feature Image</Label>
-              <div className="space-y-2">
+              <div className="space-y-2 mt-1">
                 {formData.feature_image ? (
                   <div className="relative">
                     <img
                       src={formData.feature_image}
                       alt="Feature"
-                      className="w-full h-64 object-cover rounded-lg"
+                      className="w-full h-48 object-cover rounded-lg"
                     />
                     <Button
                       variant="destructive"
@@ -1049,8 +1067,8 @@ export default function BlogsPage() {
                     </Button>
                   </div>
                 ) : (
-                  <div className="border-2 border-dashed rounded-lg p-8 text-center hover:border-primary/50 transition-colors">
-                    <ImageIcon className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                  <div className="border-2 border-dashed rounded-lg p-6 text-center hover:border-primary/50 transition-colors">
+                    <ImageIcon className="h-10 w-10 mx-auto mb-3 text-muted-foreground" />
                     <Label
                       htmlFor="image-upload"
                       className="cursor-pointer inline-block"
@@ -1068,7 +1086,7 @@ export default function BlogsPage() {
                           </>
                         )}
                       </div>
-                      <p className="text-xs text-muted-foreground mt-2">
+                      <p className="text-xs text-muted-foreground mt-1">
                         PNG, JPG, GIF up to 5MB
                       </p>
                     </Label>
@@ -1085,7 +1103,7 @@ export default function BlogsPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="category">Category</Label>
                 <Select
@@ -1093,7 +1111,7 @@ export default function BlogsPage() {
                   onValueChange={handleCategoryChange}
                   disabled={saving}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className="mt-1">
                     <SelectValue placeholder="Select category" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1115,7 +1133,7 @@ export default function BlogsPage() {
                   }
                   disabled={saving}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className="mt-1">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1129,7 +1147,7 @@ export default function BlogsPage() {
             </div>
 
             <div>
-              <Label>Tags</Label>
+              <Label className="mb-1 block">Tags</Label>
               <Popover>
                 <PopoverTrigger asChild>
                   <Button variant="outline" className="w-full justify-start">
@@ -1139,7 +1157,7 @@ export default function BlogsPage() {
                       : 'Select tags'}
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-[400px] p-4">
+                <PopoverContent className="w-[340px] p-4">
                   <div className="space-y-2">
                     <p className="text-sm font-medium">Select Tags</p>
                     <div className="max-h-[200px] overflow-y-auto space-y-2">
@@ -1188,7 +1206,7 @@ export default function BlogsPage() {
             </div>
           </div>
 
-          <DialogFooter>
+          <SheetFooter className="gap-2 flex-row justify-end border-t pt-4">
             <Button
               variant="outline"
               onClick={() => setShowDialog(false)}
@@ -1200,9 +1218,9 @@ export default function BlogsPage() {
               {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               {editingBlog ? 'Update' : 'Create'} Blog
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
 
       {/* Create Category Dialog */}
       <Dialog open={showCategoryDialog} onOpenChange={setShowCategoryDialog}>
