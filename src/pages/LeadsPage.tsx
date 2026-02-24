@@ -38,7 +38,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 
 /* ================= TYPES ================= */
 
-type LeadSource = 'facebook' | 'linkedin' | 'form' | 'seo' | 'website';
+type LeadSource = 'facebook' | 'linkedin' | 'form' | 'seo' | 'website' | 'website_contact' | string;
 type LeadStatus = 'pending' | 'completed' | 'remainder';
 
 type Lead = {
@@ -132,11 +132,15 @@ export default function LeadsPage() {
     let filtered = [...leads];
 
     if (statusFilter !== 'all') {
-      filtered = filtered.filter(l => l.status === statusFilter);
+      filtered = filtered.filter(l => (l.status || '').toLowerCase() === statusFilter.toLowerCase());
     }
 
     if (sourceFilter !== 'all') {
-      filtered = filtered.filter(l => l.source === sourceFilter);
+      filtered = filtered.filter(l => {
+        const s = (l.source || '').toLowerCase();
+        if (sourceFilter === 'form') return s.includes('form');
+        return s === sourceFilter.toLowerCase();
+      });
     }
 
     setFilteredLeads(filtered);
@@ -209,7 +213,7 @@ export default function LeadsPage() {
   };
 
   const getSourceBadge = (source: LeadSource) => (
-    <Badge variant="outline">{source}</Badge>
+    <Badge variant="outline">{(source as string).replace(/_/g, ' ')}</Badge>
   );
 
   /* ================= LOADING ================= */
@@ -317,7 +321,7 @@ export default function LeadsPage() {
               <TableRow>
                 <TableHead>Name</TableHead>
                 <TableHead>Email</TableHead>
-                <TableHead>Phone</TableHead>
+                <TableHead className="hidden md:table-cell">Phone</TableHead>
                 <TableHead>Source</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Created</TableHead>
@@ -336,8 +340,8 @@ export default function LeadsPage() {
                 filteredLeads.map(lead => (
                   <TableRow key={lead.id}>
                     <TableCell>{lead.name}</TableCell>
-                    <TableCell>{lead.email}</TableCell>
-                    <TableCell>{lead.phone ?? '-'}</TableCell>
+                    <TableCell className="max-w-[200px] truncate">{lead.email}</TableCell>
+                    <TableCell className="hidden md:table-cell">{lead.phone ?? '-'}</TableCell>
                     <TableCell>{getSourceBadge(lead.source)}</TableCell>
                     <TableCell>{getStatusBadge(lead.status)}</TableCell>
                     <TableCell>

@@ -107,8 +107,10 @@ export function createWordPressApi(wpBaseUrl: string, authHeader: Record<string,
   return {
     // ── Posts ───────────────────────────────────────────────
     async getAllPosts() {
+      // Fetch all statuses, not just published
+      // brought all the data from the wordpress api
       const res = await fetch(
-        `${WP_BASE_URL}/posts?_embed&per_page=100&status=publish&orderby=date&order=desc`,
+        `${WP_BASE_URL}/posts?_embed&per_page=100&status=publish,draft,private,pending,future&orderby=date&order=desc`,
         { headers: AUTH_HEADER }
       );
 

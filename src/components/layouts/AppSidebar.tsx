@@ -132,7 +132,7 @@ export function AppSidebar({ isCollapsed = false, toggleSidebar }: AppSidebarPro
           <TooltipProvider delayDuration={0}>
             <AnimatePresence>
               {filteredNavigation.map((item, index) => {
-                const isActive = location.pathname === item.href;
+                const isActive = location.pathname === item.href || location.pathname.startsWith(item.href + '/');
 
                 const content = (
                   <motion.div

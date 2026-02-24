@@ -6,6 +6,7 @@ import LeadsPageEnhanced from './pages/LeadsPageEnhanced';
 import LeadDetailPage from './pages/LeadDetailPage';
 import SeoPage from './pages/SeoPage';
 import BlogsPage from './pages/BlogsPage';
+import BlogDetailPage from './pages/BlogDetailPage';
 import SitesPage from './pages/SitesPage';
 import IPSecurityPage from './pages/IPSecurityPage';
 import UsersPage from './pages/UsersPage';
@@ -48,6 +49,11 @@ const routes: RouteConfig[] = [
     name: 'Blogs',
     path: '/blogs',
     element: <BlogsPage />
+  },
+  {
+    name: 'Blog Detail',
+    path: '/blogs/:id',
+    element: <BlogDetailPage />
   },
   {
     name: 'Sites',
