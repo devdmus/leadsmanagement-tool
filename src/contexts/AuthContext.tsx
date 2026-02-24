@@ -243,6 +243,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // ── Session validity polling (single-session enforcement for non-super-admin) ──
+  useEffect(() => {
+    // Super admin is exempt from session management
+    if (!profile || profile.role === 'super_admin') return;
+
+    // Only poll for users with a super admin token (backend-authenticated users)
+    // WordPress users rely on idle timeout only since they don't have backend sessions
+    if (!superAdminToken) return;
+
+    const interval = setInterval(async () => {
+      const isValid = await superAdminApi.checkSessionValid(superAdminToken);
+      if (!isValid) {
+        // Session was invalidated (e.g., user logged in from another device)
+        clearInterval(interval);
+        setProfile(null);
+        setSuperAdminToken(null);
+        localStorage.removeItem('crm_sa_token');
+        localStorage.removeItem('crm_profile');
+        window.location.href = '/login?reason=session_invalidated';
+      }
+    }, 60_000); // Check every 60 seconds
+
+    return () => clearInterval(interval);
+  }, [superAdminToken, profile?.role]);
+
   // ── Permission check ────────────────────────────────────────────────────────
   const hasPermission = (feature: string, permissionType: 'read' | 'write') => {
     if (!profile) return false;
@@ -456,6 +481,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ── Sign out ────────────────────────────────────────────────────────────────
 
   const signOut = async () => {
+    // Invalidate session on backend for super admin
+    if (superAdminToken) {
+      try {
+        await superAdminApi.logout(superAdminToken);
+      } catch {
+        // Continue with client-side logout regardless
+      }
+    }
+
     if (profile && wpCredentials && profile.role !== 'super_admin') {
       try {
         const { createWordPressApi } = await import('../db/wordpressApi');

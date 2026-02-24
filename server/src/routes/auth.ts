@@ -3,6 +3,7 @@ import bcrypt from 'bcrypt';
 import pool from '../db.js';
 import { signToken } from '../utils/jwt.js';
 import { requireSuperAdmin, AuthRequest } from '../middleware/authMiddleware.js';
+import { createSession, invalidateSession, validateSession } from '../utils/session.js';
 
 const router = Router();
 
@@ -34,6 +35,16 @@ router.post('/login', async (req, res) => {
     }
 
     const token = signToken({ id: user.id, username: user.username });
+
+    // Create session (invalidates any previous active sessions for this user)
+    await createSession({
+      userId: user.id,
+      userType: 'super_admin',
+      token,
+      ipAddress: req.ip || (req.headers['x-forwarded-for'] as string),
+      userAgent: req.headers['user-agent'],
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24h, matching JWT expiry
+    });
 
     res.json({
       token,
@@ -73,6 +84,34 @@ router.get('/me', requireSuperAdmin, async (req: AuthRequest, res) => {
     });
   } catch (err: any) {
     console.error('Get me error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/auth/logout
+router.post('/logout', requireSuperAdmin, async (req: AuthRequest, res) => {
+  try {
+    const token = req.headers.authorization!.slice(7); // Remove 'Bearer '
+    await invalidateSession(token);
+    res.json({ message: 'Logged out successfully' });
+  } catch (err: any) {
+    console.error('Logout error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/auth/session-valid
+router.get('/session-valid', requireSuperAdmin, async (req: AuthRequest, res) => {
+  try {
+    const token = req.headers.authorization!.slice(7);
+    const isValid = await validateSession(token);
+    if (!isValid) {
+      res.status(401).json({ error: 'Session invalidated', code: 'SESSION_INVALIDATED' });
+      return;
+    }
+    res.json({ valid: true });
+  } catch (err: any) {
+    console.error('Session check error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

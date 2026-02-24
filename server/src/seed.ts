@@ -73,6 +73,24 @@ async function seed() {
     )
   `);
 
+  await conn.query(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      user_type ENUM('super_admin', 'wp_user') NOT NULL DEFAULT 'super_admin',
+      token_hash VARCHAR(64) NOT NULL,
+      is_active BOOLEAN DEFAULT TRUE,
+      ip_address VARCHAR(45),
+      user_agent VARCHAR(500),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      expires_at TIMESTAMP NOT NULL,
+      invalidated_at TIMESTAMP NULL,
+      UNIQUE KEY unique_token (token_hash),
+      INDEX idx_user_active (user_id, user_type, is_active),
+      INDEX idx_token_active (token_hash, is_active)
+    )
+  `);
+
   // Seed super admin
   console.log('Seeding super admin...');
   const passwordHash = await bcrypt.hash('admin123', 10);

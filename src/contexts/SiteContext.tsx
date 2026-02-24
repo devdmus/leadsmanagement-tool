@@ -148,6 +148,9 @@ export function SiteProvider({ children }: { children: ReactNode }) {
     const setCurrentSite = (siteId: string) => {
         const site = sites.find(s => s.id === siteId);
         if (site) {
+            // Sync siteCache immediately so child useEffects see the new site
+            // when they fire (before the parent useEffect would run)
+            setSiteCache(sites, siteId);
             setCurrentSiteState(site);
             localStorage.setItem(CURRENT_SITE_KEY, siteId);
         }

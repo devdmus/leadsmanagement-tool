@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { wpLeadsApi } from '@/db/wpLeadsApi';
 import { activityLogsApi } from '@/db/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { useSite } from '@/contexts/SiteContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -68,7 +69,8 @@ export default function LeadsPage() {
 
   /* ================= LOAD DATA ================= */
 
-  const { profile, hasPermission } = useAuth(); // Destructure profile here
+  const { profile, hasPermission } = useAuth();
+  const { currentSite } = useSite();
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -85,7 +87,7 @@ export default function LeadsPage() {
     if (profile) {
       loadData();
     }
-  }, [profile?.id]);
+  }, [profile?.id, currentSite?.id]);
 
   useEffect(() => {
     filterLeads();

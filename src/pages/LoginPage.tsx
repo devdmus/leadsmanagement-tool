@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,9 +16,28 @@ export default function LoginPage() {
   const { signInWithUsername, signInAsSuperAdmin } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const { toast } = useToast();
 
   const from = (location.state as { from?: string })?.from || '/';
+
+  // Show reason message if user was redirected due to session expiry
+  useEffect(() => {
+    const reason = searchParams.get('reason');
+    if (reason === 'idle') {
+      toast({
+        title: 'Session Expired',
+        description: 'You were logged out due to inactivity.',
+        variant: 'destructive',
+      });
+    } else if (reason === 'session_invalidated') {
+      toast({
+        title: 'Session Ended',
+        description: 'Your session was ended because you logged in from another device.',
+        variant: 'destructive',
+      });
+    }
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
