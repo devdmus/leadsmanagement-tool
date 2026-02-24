@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSite } from '@/contexts/SiteContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -41,9 +41,23 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { Plus, Trash2, Shield, Globe, History } from 'lucide-react';
+import { Plus, Trash2, Shield, Globe, History, RefreshCw } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { profilesApi, activityLogsApi } from '@/db/api';
+import { createWordPressApi } from '@/db/wordpressApi';
+import { getCurrentSiteFromCache, getAllSitesFromCache } from '@/utils/siteCache';
+
+// Dynamically get the current site's wp-json base from siteCache
+function getCurrentWpJsonBase(): string {
+    try {
+        const site = getCurrentSiteFromCache();
+        if (site?.url) {
+            let url = site.url.replace(/\/$/, '');
+            if (!url.includes('/wp-json')) url += '/wp-json';
+            return url;
+        }
+    } catch (_) { }
+    return '';
+}
 
 interface WhitelistedIP {
     id: string;
@@ -56,102 +70,183 @@ interface WhitelistedIP {
 }
 
 interface IPLog {
+    id?: string;
     action: string;
+    details?: any;
+    user_id?: string;
+    created_at?: string;
+    // legacy local fields
     ip?: string;
     loginIP?: string;
     currentIP?: string;
     oldIP?: string;
     newIP?: string;
-    userId: string;
+    userId?: string;
     username?: string;
-    timestamp: string;
+    timestamp?: string;
 }
 
 export default function IPSecurityPage() {
-    const { profile } = useAuth();
+    const { profile, getWpAuthHeader } = useAuth();
     const { currentSite } = useSite();
     const { toast } = useToast();
-
-    // Site-scoped localStorage keys so each site has its own whitelist & logs
-    const siteKey = currentSite?.id || 'default';
-    const IP_WHITELIST_KEY = `crm_ip_whitelist_${siteKey}`;
-    const IP_LOGS_KEY = `crm_ip_logs_${siteKey}`;
 
     const [whitelist, setWhitelist] = useState<WhitelistedIP[]>([]);
     const [logs, setLogs] = useState<IPLog[]>([]);
     const [users, setUsers] = useState<Array<{ id: string; username: string }>>([]);
     const [currentIP, setCurrentIP] = useState<string | null>(null);
 
+    const [loadingWhitelist, setLoadingWhitelist] = useState(false);
+    const [loadingLogs, setLoadingLogs] = useState(false);
+    const [savingIP, setSavingIP] = useState(false);
+
     const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-    const [formData, setFormData] = useState({
-        ip: '',
-        userId: '',
-        label: '',
-    });
+    const [formData, setFormData] = useState({ ip: '', userId: '', label: '' });
 
-    // Reload data whenever the selected site changes
+    // Get auth header for the current site
+    const getSiteAuth = (): string => {
+        try {
+            // 1. Try per-site credentials for the current site
+            const currentSiteId = localStorage.getItem('crm_current_site_id');
+            const siteCreds = localStorage.getItem('crm_site_credentials');
+            if (currentSiteId && siteCreds) {
+                const map = JSON.parse(siteCreds);
+                const creds = map[currentSiteId];
+                if (creds?.username && creds?.password) {
+                    return 'Basic ' + btoa(`${creds.username}:${creds.password}`);
+                }
+            }
+        } catch (_) { }
+        // 2. Fallback: use whatever global credentials are stored
+        return getWpAuthHeader();
+    };
+
+    const getApi = useCallback(() => {
+        const authHeader = getSiteAuth();
+        const wpJsonBase = getCurrentWpJsonBase();
+        if (!wpJsonBase) {
+            console.warn('No site configured for IP Security');
+            return createWordPressApi('', { Authorization: authHeader });
+        }
+        return createWordPressApi(wpJsonBase, { Authorization: authHeader });
+    }, []);
+
+    // ── Fetch whitelist from WordPress ─────────────────────────────────────────
+    const fetchWhitelist = useCallback(async () => {
+        setLoadingWhitelist(true);
+        try {
+            const api = getApi();
+            const data = await api.getIPWhitelist();
+            setWhitelist(Array.isArray(data) ? data : []);
+        } catch (err: any) {
+            console.warn('Could not load IP whitelist from server:', err);
+            toast({
+                title: 'Could not load whitelist',
+                description: err?.message || 'Ensure the WordPress plugin endpoint is installed.',
+                variant: 'destructive',
+            });
+            setWhitelist([]);
+        } finally {
+            setLoadingWhitelist(false);
+        }
+    }, []);
+
+    // ── Fetch IP logs from WordPress /crm/v1/logs ──────────────────────────────
+    const fetchLogs = useCallback(async () => {
+        setLoadingLogs(true);
+        try {
+            const api = getApi();
+            const data = await api.getActivityLogs(1);
+            // Filter to IP-related actions only
+            const ipActions = ['login', 'logout', 'ip_whitelist_add', 'ip_whitelist_remove', 'unauthorized_attempt', 'permission_requested'];
+            const filtered = (Array.isArray(data) ? data : []).filter((l: any) =>
+                ipActions.includes(l.action)
+            );
+            setLogs(filtered);
+        } catch (err) {
+            console.warn('Could not load IP logs from server:', err);
+            setLogs([]);
+        } finally {
+            setLoadingLogs(false);
+        }
+    }, []);
+
+    // ── Load on mount / site change ────────────────────────────────────────────
     useEffect(() => {
-        // Load site-specific whitelist
-        const savedWhitelist = localStorage.getItem(IP_WHITELIST_KEY);
-        setWhitelist(savedWhitelist ? JSON.parse(savedWhitelist) : []);
+        fetchWhitelist();
+        fetchLogs();
 
-        // Load site-specific IP logs
-        const savedLogs = localStorage.getItem(IP_LOGS_KEY);
-        setLogs(savedLogs ? JSON.parse(savedLogs) : []);
-
-        // Load users
+        // Load users from ALL known sites and merge them (deduplicated by username)
+        // so the admin can whitelist users from any site
         const loadUsers = async () => {
-            const allUsers = await profilesApi.getAll();
-            setUsers(allUsers.map((u: any) => ({ id: u.id, username: u.username })));
+            const allUsers: Array<{ id: string; username: string; site: string }> = [];
+            try {
+                const sites = getAllSitesFromCache();
+                const siteCreds: Record<string, { username: string; password: string }> =
+                    JSON.parse(localStorage.getItem('crm_site_credentials') || '{}');
+
+                for (const site of sites) {
+                    const creds = siteCreds[site.id];
+                    if (!creds) continue;
+                    const auth = 'Basic ' + btoa(`${creds.username}:${creds.password}`);
+                    const siteBase = site.url.replace(/\/$/, '') + '/wp-json';
+                    try {
+                        const res = await fetch(
+                            `${siteBase}/wp/v2/users?context=view&per_page=100`,
+                            { headers: { Authorization: auth } }
+                        );
+                        if (res.ok) {
+                            const wpUsers = await res.json();
+                            wpUsers.forEach((u: any) => {
+                                const uname = u.name || u.slug;
+                                // Deduplicate by username across sites
+                                if (!allUsers.find(x => x.username === uname)) {
+                                    allUsers.push({
+                                        id: `${site.id}_${u.id}`,
+                                        username: `${uname} (${site.name})`,
+                                        site: site.id,
+                                    });
+                                }
+                            });
+                        }
+                    } catch (_) { }
+                }
+            } catch (_) { }
+
+            if (allUsers.length > 0) {
+                setUsers(allUsers);
+            } else {
+                // Fallback mock
+                setUsers([
+                    { id: '1', username: 'Admin' },
+                    { id: '2', username: 'Sales Agent' },
+                ]);
+            }
         };
         loadUsers();
 
-        // Get current IP (only once needed)
+        // Get current IP (only once)
         if (!currentIP) {
-            const fetchIP = async () => {
-                try {
-                    const res = await fetch('https://api.ipify.org?format=json');
-                    if (res.ok) {
-                        const data = await res.json();
-                        setCurrentIP(data.ip);
-                    }
-                } catch (e) {
-                    console.warn('Could not fetch IP');
-                }
-            };
-            fetchIP();
+            fetch('https://api.ipify.org?format=json')
+                .then(r => r.ok ? r.json() : null)
+                .then(data => { if (data?.ip) setCurrentIP(data.ip); })
+                .catch(() => { });
         }
     }, [currentSite?.id]);
 
-    // Save whitelist to the site-specific key
-    const saveWhitelist = (newList: WhitelistedIP[]) => {
-        setWhitelist(newList);
-        localStorage.setItem(IP_WHITELIST_KEY, JSON.stringify(newList));
-    };
-
-    const handleAddIP = () => {
+    // ── Add IP ────────────────────────────────────────────────────────────────
+    const handleAddIP = async () => {
         if (!formData.ip || !formData.userId) {
-            toast({
-                title: 'Error',
-                description: 'IP address and user are required',
-                variant: 'destructive',
-            });
+            toast({ title: 'Error', description: 'IP address and user are required', variant: 'destructive' });
             return;
         }
-
-        // Validate IP format (basic)
         const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
         if (!ipRegex.test(formData.ip)) {
-            toast({
-                title: 'Invalid IP',
-                description: 'Please enter a valid IP address (e.g., 192.168.1.1)',
-                variant: 'destructive',
-            });
+            toast({ title: 'Invalid IP', description: 'Please enter a valid IP address (e.g., 192.168.1.1)', variant: 'destructive' });
             return;
         }
 
         const selectedUser = users.find(u => u.id === formData.userId);
-
         const newEntry: WhitelistedIP = {
             id: Math.random().toString(36).substr(2, 9),
             ip: formData.ip,
@@ -162,79 +257,75 @@ export default function IPSecurityPage() {
             addedAt: new Date().toISOString(),
         };
 
-        saveWhitelist([...whitelist, newEntry]);
-
-        // Server-side logging
-        if (profile) {
-            activityLogsApi.create({
-                user_id: profile.id as string,
-                action: 'ip_whitelist_add',
-                details: { ip: formData.ip, for_user: selectedUser?.username }
-            });
+        setSavingIP(true);
+        try {
+            const api = getApi();
+            await api.addIPWhitelist(newEntry);
+            await api.logActivity('ip_whitelist_add', `IP ${formData.ip} whitelisted for ${selectedUser?.username} by ${profile?.username}`);
+            await fetchWhitelist();
+            toast({ title: 'IP Added', description: `${formData.ip} is now whitelisted for ${selectedUser?.username}` });
+            setFormData({ ip: '', userId: '', label: '' });
+            setIsAddDialogOpen(false);
+        } catch (err: any) {
+            console.error('Add IP error:', err);
+            toast({ title: 'Failed to add IP', description: err?.message || 'Unknown error', variant: 'destructive' });
+        } finally {
+            setSavingIP(false);
         }
-
-        toast({
-            title: 'IP Added',
-            description: `${formData.ip} is now whitelisted for ${selectedUser?.username}`,
-        });
-
-        setFormData({ ip: '', userId: '', label: '' });
-        setIsAddDialogOpen(false);
     };
 
-    const handleRemoveIP = (id: string) => {
+    // ── Remove IP ──────────────────────────────────────────────────────────────
+    const handleRemoveIP = async (id: string) => {
         const removedEntry = whitelist.find(w => w.id === id);
-        const updated = whitelist.filter(w => w.id !== id);
-        saveWhitelist(updated);
-
-        // Server-side logging
-        if (profile && removedEntry) {
-            activityLogsApi.create({
-                user_id: profile.id as string,
-                action: 'ip_whitelist_remove',
-                details: { ip: removedEntry.ip, for_user: removedEntry.username }
-            });
+        try {
+            const api = getApi();
+            await api.deleteIPWhitelist(id);
+            if (removedEntry) {
+                await api.logActivity('ip_whitelist_remove', `IP ${removedEntry.ip} removed for ${removedEntry.username} by ${profile?.username}`);
+            }
+            await fetchWhitelist();
+            toast({ title: 'IP Removed', description: 'The IP address has been removed from the whitelist' });
+        } catch (err) {
+            toast({ title: 'Failed to remove IP', variant: 'destructive' });
         }
-        toast({
-            title: 'IP Removed',
-            description: 'The IP address has been removed from whitelist',
-        });
     };
 
-    const handleAddCurrentIP = (userId: string) => {
+    // ── Quick add current IP ───────────────────────────────────────────────────
+    const handleAddCurrentIP = async (userId: string) => {
         if (!currentIP) return;
-
         const selectedUser = users.find(u => u.id === userId);
-
         const newEntry: WhitelistedIP = {
             id: Math.random().toString(36).substr(2, 9),
             ip: currentIP,
-            userId: userId,
+            userId,
             username: selectedUser?.username || 'Unknown',
             label: 'Current Device',
             addedBy: String(profile?.username || 'Admin'),
             addedAt: new Date().toISOString(),
         };
 
-        saveWhitelist([...whitelist, newEntry]);
-
-        toast({
-            title: 'Current IP Added',
-            description: `${currentIP} is now whitelisted for ${selectedUser?.username}`,
-        });
+        try {
+            const api = getApi();
+            await api.addIPWhitelist(newEntry);
+            await api.logActivity('ip_whitelist_add', `IP ${currentIP} (current device) whitelisted for ${selectedUser?.username} by ${profile?.username}`);
+            await fetchWhitelist();
+            toast({ title: 'Current IP Added', description: `${currentIP} is now whitelisted for ${selectedUser?.username}` });
+        } catch (err) {
+            toast({ title: 'Failed to add IP', variant: 'destructive' });
+        }
     };
 
-    const clearLogs = () => {
-        localStorage.removeItem(IP_LOGS_KEY);
-        setLogs([]);
-        toast({
-            title: 'Logs Cleared',
-            description: `All IP activity logs for ${currentSite?.name || 'this site'} have been cleared`,
-        });
+    // ── Approve permission request ─────────────────────────────────────────────
+    const handleApproveRequest = (log: IPLog) => {
+        const ip = log.ip || (log.details && typeof log.details === 'object' ? log.details.ip : '');
+        const userId = log.user_id || log.userId || '';
+        const username = log.username || userId;
+        setFormData({ ip, userId, label: `Approved — requested by ${username}` });
+        setIsAddDialogOpen(true);
     };
 
-    // Check if current user can access this page
-    if (!profile || profile.role !== 'admin') {
+    // ── Guard ─────────────────────────────────────────────────────────────────
+    if (!profile || profile.role !== 'super_admin') {
         return (
             <div className="flex items-center justify-center min-h-[400px]">
                 <p className="text-muted-foreground">You don't have permission to access this page.</p>
@@ -242,8 +333,32 @@ export default function IPSecurityPage() {
         );
     }
 
+    // ── Helpers for log display ────────────────────────────────────────────────
+    const getLogIP = (log: IPLog): string => {
+        if (log.ip) return log.ip;
+        if (log.details && typeof log.details === 'object') {
+            if (log.details.ip) return log.details.ip;
+            if (log.details.loginIP && log.details.currentIP)
+                return `Login: ${log.details.loginIP} → Current: ${log.details.currentIP}`;
+        }
+        return '';
+    };
+
+    const getLogUsername = (log: IPLog): string =>
+        log.username || log.user_id || log.userId || '—';
+
+    const getLogTimestamp = (log: IPLog): string =>
+        log.created_at || log.timestamp || '';
+
+    const isAlertLog = (log: IPLog) =>
+        log.action === 'ip_mismatch' || log.action === 'unauthorized_attempt';
+
+    const isWarningLog = (log: IPLog) =>
+        log.action === 'permission_requested';
+
     return (
         <div className="space-y-6">
+            {/* Header */}
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="text-3xl font-bold flex items-center gap-2">
@@ -251,17 +366,20 @@ export default function IPSecurityPage() {
                         IP Security Settings
                     </h1>
                     <p className="text-muted-foreground">
-                        Manage allowed IP addresses for{' '}
-                        <span className="font-medium text-foreground">{currentSite?.name || 'selected site'}</span>
+                        Manage allowed IP addresses — stored in WordPress, shared across all sites and devices
                     </p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 items-center flex-wrap justify-end">
                     {currentIP && (
                         <Badge variant="outline" className="text-sm py-2 px-3">
                             <Globe className="h-4 w-4 mr-2" />
                             Your IP: {currentIP}
                         </Badge>
                     )}
+                    <Button variant="outline" size="sm" onClick={() => { fetchWhitelist(); fetchLogs(); }}>
+                        <RefreshCw className="h-4 w-4 mr-1" />
+                        Refresh
+                    </Button>
                     <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
                         <DialogTrigger asChild>
                             <Button>
@@ -273,7 +391,7 @@ export default function IPSecurityPage() {
                             <DialogHeader>
                                 <DialogTitle>Add Whitelisted IP</DialogTitle>
                                 <DialogDescription>
-                                    Allow a specific IP address to access the system
+                                    Allow a specific IP address to access the system. This is saved to WordPress and applies to all devices instantly.
                                 </DialogDescription>
                             </DialogHeader>
                             <div className="space-y-4">
@@ -324,10 +442,13 @@ export default function IPSecurityPage() {
                                 </div>
                             </div>
                             <DialogFooter>
-                                <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+                                <Button variant="outline" onClick={() => setIsAddDialogOpen(false)} disabled={savingIP}>
                                     Cancel
                                 </Button>
-                                <Button onClick={handleAddIP}>Add IP</Button>
+                                <Button onClick={handleAddIP} disabled={savingIP}>
+                                    {savingIP ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Plus className="h-4 w-4 mr-2" />}
+                                    Add IP
+                                </Button>
                             </DialogFooter>
                         </DialogContent>
                     </Dialog>
@@ -336,11 +457,15 @@ export default function IPSecurityPage() {
 
             {/* Whitelist Table */}
             <Card>
-                <CardHeader>
-                    <CardTitle>Whitelisted IP Addresses</CardTitle>
-                    <CardDescription>
-                        Users can access <strong>{currentSite?.name || 'this site'}</strong> from these IP addresses without security alerts
-                    </CardDescription>
+                <CardHeader className="flex flex-row items-center justify-between">
+                    <div>
+                        <CardTitle>Whitelisted IP Addresses</CardTitle>
+                        <CardDescription>
+                            Users can access the CRM from these IP addresses.
+                            Changes apply to <strong>all sites and devices instantly</strong>.
+                        </CardDescription>
+                    </div>
+                    {loadingWhitelist && <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />}
                 </CardHeader>
                 <CardContent>
                     {whitelist.length === 0 ? (
@@ -382,7 +507,7 @@ export default function IPSecurityPage() {
                                                     <AlertDialogHeader>
                                                         <AlertDialogTitle>Remove IP?</AlertDialogTitle>
                                                         <AlertDialogDescription>
-                                                            This will remove {entry.ip} from the whitelist. The user will get security alerts when accessing from this IP.
+                                                            This will remove <strong>{entry.ip}</strong> from the whitelist immediately across all devices. {entry.username} will be blocked when accessing from this IP.
                                                         </AlertDialogDescription>
                                                     </AlertDialogHeader>
                                                     <AlertDialogFooter>
@@ -402,7 +527,7 @@ export default function IPSecurityPage() {
                 </CardContent>
             </Card>
 
-            {/* Quick Add for Users */}
+            {/* Quick Add Current IP */}
             <Card>
                 <CardHeader>
                     <CardTitle>Quick Add Current IP</CardTitle>
@@ -418,7 +543,16 @@ export default function IPSecurityPage() {
                                 variant="outline"
                                 size="sm"
                                 onClick={() => handleAddCurrentIP(user.id)}
-                                disabled={!currentIP || whitelist.some(w => w.ip === currentIP && w.userId === user.id)}
+                                disabled={!currentIP || whitelist.some(w => {
+                                    if (w.ip !== currentIP) return false;
+                                    const storedId = String(w.userId);
+                                    const uid = String(user.id);
+                                    // Support both old "42" and new "siteId_42" formats
+                                    const wpIdFromStored = storedId.includes('_')
+                                        ? storedId.split('_').pop() ?? storedId
+                                        : storedId;
+                                    return wpIdFromStored === uid || storedId === uid;
+                                })}
                             >
                                 <Plus className="h-3 w-3 mr-1" />
                                 {user.username}
@@ -437,14 +571,15 @@ export default function IPSecurityPage() {
                             IP Activity Logs
                         </CardTitle>
                         <CardDescription>
-                            Recent IP-related security events for <strong>{currentSite?.name || 'this site'}</strong>
+                            Recent IP-related security events — fetched from WordPress, all sites and devices included
                         </CardDescription>
                     </div>
-                    {logs.length > 0 && (
-                        <Button variant="outline" size="sm" onClick={clearLogs}>
-                            Clear Logs
-                        </Button>
-                    )}
+                    <Button variant="outline" size="sm" onClick={fetchLogs} disabled={loadingLogs}>
+                        {loadingLogs
+                            ? <RefreshCw className="h-4 w-4 animate-spin" />
+                            : <RefreshCw className="h-4 w-4" />}
+                        <span className="ml-1">Refresh</span>
+                    </Button>
                 </CardHeader>
                 <CardContent>
                     {logs.length === 0 ? (
@@ -456,55 +591,48 @@ export default function IPSecurityPage() {
                         <div className="space-y-2 max-h-[400px] overflow-auto">
                             {logs.slice(0, 50).map((log, index) => (
                                 <div
-                                    key={index}
-                                    className={`p-3 rounded-lg border text-sm ${log.action === 'ip_mismatch' || log.action === 'unauthorized_attempt'
+                                    key={log.id || index}
+                                    className={`p-3 rounded-lg border text-sm ${isAlertLog(log)
                                         ? 'border-destructive/50 bg-destructive/5'
-                                        : log.action === 'permission_requested'
-                                            ? 'border-warning/50 bg-warning/5'
+                                        : isWarningLog(log)
+                                            ? 'border-amber-300/50 bg-amber-50/50'
                                             : 'border-border bg-muted/30'
                                         }`}
                                 >
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-2">
                                             <Badge variant={
-                                                log.action === 'ip_mismatch' || log.action === 'unauthorized_attempt'
-                                                    ? 'destructive'
-                                                    : log.action === 'permission_requested'
-                                                        ? 'outline'
+                                                isAlertLog(log) ? 'destructive'
+                                                    : isWarningLog(log) ? 'outline'
                                                         : 'secondary'
                                             }>
-                                                {log.action.replace('_', ' ')}
+                                                {log.action.replace(/_/g, ' ')}
                                             </Badge>
-                                            <span className="font-medium">{log.username || log.userId}</span>
+                                            <span className="font-medium">{getLogUsername(log)}</span>
                                         </div>
                                         <div className="flex items-center gap-3">
                                             <span className="text-muted-foreground text-xs">
-                                                {new Date(log.timestamp).toLocaleString()}
+                                                {getLogTimestamp(log)
+                                                    ? new Date(getLogTimestamp(log)).toLocaleString()
+                                                    : '—'}
                                             </span>
-                                            {log.action === 'permission_requested' && (
+                                            {isWarningLog(log) && (
                                                 <Button
                                                     size="sm"
                                                     variant="outline"
                                                     className="h-7 text-[10px]"
-                                                    onClick={() => {
-                                                        setFormData({
-                                                            ip: log.ip || '',
-                                                            userId: log.userId,
-                                                            label: `Requested by ${log.username}`
-                                                        });
-                                                        setIsAddDialogOpen(true);
-                                                    }}
+                                                    onClick={() => handleApproveRequest(log)}
                                                 >
                                                     Approve
                                                 </Button>
                                             )}
                                         </div>
                                     </div>
-                                    <div className="mt-1 text-muted-foreground font-mono text-xs">
-                                        {log.ip && `IP: ${log.ip}`}
-                                        {log.loginIP && log.currentIP && `Login: ${log.loginIP} → Current: ${log.currentIP}`}
-                                        {log.oldIP && log.newIP && `${log.oldIP} → ${log.newIP}`}
-                                    </div>
+                                    {getLogIP(log) && (
+                                        <div className="mt-1 text-muted-foreground font-mono text-xs">
+                                            IP: {getLogIP(log)}
+                                        </div>
+                                    )}
                                 </div>
                             ))}
                         </div>

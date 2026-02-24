@@ -1,6 +1,32 @@
-export type UserRole = 'admin' | 'sales_manager' | 'sales_person' | 'seo_manager' | 'seo_person' | 'client';
-export type LeadSource = 'facebook' | 'linkedin' | 'form' | 'seo' | 'website' | 'website_contact' | (string & {});
+export type UserRole = 'super_admin' | 'admin' | 'lead_manager' | 'seo_manager' | 'sales_person' | 'seo_person' | 'client';
+export type LeadSource = 'facebook' | 'linkedin' | 'form' | 'seo' | (string & {});
 export type LeadStatus = 'pending' | 'completed' | 'remainder';
+
+export type FeatureName =
+  | 'leads'
+  | 'users'
+  | 'activity_logs'
+  | 'subscriptions'
+  | 'seo_meta_tags'
+  | 'blogs'
+  | 'sites'
+  | 'ip_security'
+  | 'permissions';
+
+export type Permission = {
+  can_read: boolean;
+  can_write: boolean;
+};
+
+export type PermissionMatrix = Record<string, Record<string, Permission>>;
+
+export type UserSiteAssignment = {
+  id: string;
+  wp_user_id: string;
+  site_id: string;
+  app_role: UserRole;
+  created_at: string;
+};
 
 export type Profile = {
   id: string;
@@ -64,7 +90,7 @@ export type ActivityLog = {
 export type RolePermission = {
   id: string;
   role: UserRole;
-  feature: string;
+  feature: FeatureName;
   can_read: boolean;
   can_write: boolean;
   created_at: string;

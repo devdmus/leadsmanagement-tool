@@ -19,7 +19,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useNavigate } from 'react-router-dom';
 
 export default function UsersPage() {
-  const { hasPermission, isAdmin, getWpAuthHeader } = useAuth();
+  const { hasPermission, isAdmin, isSuperAdmin, getWpAuthHeader } = useAuth();
   const { currentSite, getApiBase, getAuthHeader } = useSite();
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -36,9 +36,9 @@ export default function UsersPage() {
     setLoading(true);
     setNoCredentials(false);
 
-    // If the current site has no dedicated credentials, the global credentials
-    // belong to a different WordPress install and will be rejected — skip the fetch.
-    if (currentSite && !currentSite.isDefault && !currentSite.username) {
+    // If the current site has no dedicated credentials, skip the fetch gracefully
+    // EXCEPT for Super Admins, who may have fallback credentials or full access.
+    if (currentSite && !currentSite.isDefault && !currentSite.username && !isSuperAdmin) {
       setNoCredentials(true);
       setUsers([]);
       setLoading(false);
@@ -47,7 +47,7 @@ export default function UsersPage() {
 
     try {
       const siteAuthHeader = getAuthHeader();
-      const userAuthHeader = getWpAuthHeader();
+      const userAuthHeader = getWpAuthHeader(currentSite?.id);
       const authValue = siteAuthHeader || (userAuthHeader ? userAuthHeader : null);
 
       const api = createWordPressApi(
@@ -78,12 +78,12 @@ export default function UsersPage() {
   // Build site-aware WP Admin URL
   const wpAdminUserUrl = currentSite
     ? `${currentSite.url.replace(/\/$/, '')}/wp-admin/user-new.php`
-    : 'https://digitmarketus.com/Bhairavi/wp-admin/user-new.php';
+    : '#';
 
   const getUserBadge = (roles: string[]) => {
     if (roles.includes('administrator')) return <Badge>Admin</Badge>;
     if (roles.includes('editor')) return <Badge variant="default" className="bg-purple-600">SEO Manager</Badge>;
-    if (roles.includes('author')) return <Badge variant="secondary" className="bg-blue-600 text-white">Sales Manager</Badge>;
+    if (roles.includes('author')) return <Badge variant="secondary" className="bg-blue-600 text-white">Lead Manager</Badge>;
     if (roles.includes('contributor')) return <Badge variant="secondary">Sales Person</Badge>;
     if (roles.includes('seo_person')) return <Badge variant="outline" className="border-purple-600 text-purple-600">SEO Person</Badge>;
     return <Badge variant="outline">Client</Badge>;
@@ -229,7 +229,7 @@ export default function UsersPage() {
                   </tr>
                   <tr className="border-b">
                     <td className="p-3 font-medium text-xs">Author</td>
-                    <td className="p-3"><Badge variant="secondary" className="bg-blue-600 text-white">Sales Manager</Badge></td>
+                    <td className="p-3"><Badge variant="secondary" className="bg-blue-600 text-white">Lead Manager</Badge></td>
                   </tr>
                   <tr className="border-b">
                     <td className="p-3 font-medium text-xs">Contributor</td>

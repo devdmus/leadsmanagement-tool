@@ -111,8 +111,9 @@ export default function SeoPage() {
       ]);
 
       let filteredTags = data;
-      // If SEO Person, only show assigned tags. Admin and SEO Manager see all.
-      if (profile && profile.role === 'seo_person') {
+      // Team members only see tags assigned to them. Admin, Super Admin, and Managers see all.
+      const teamRoles = ['sales_person', 'seo_person', 'client'];
+      if (profile && teamRoles.includes(profile.role)) {
         filteredTags = data.filter((tag: SeoMetaTag) => tag.assigned_to === profile.id);
       }
 

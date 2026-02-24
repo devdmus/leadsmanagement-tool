@@ -40,7 +40,7 @@ export function SiteSwitcher({
   setCurrentSite,
   isCollapsed = false,
 }: SiteSwitcherProps) {
-  const { signInWithUsername, hasSiteCredentials } = useAuth();
+  const { signInWithUsername, hasSiteCredentials, isSuperAdmin } = useAuth();
   const { toast } = useToast();
 
   // State for the re-login dialog (shown when switching to a site with no saved creds)
@@ -56,7 +56,7 @@ export function SiteSwitcher({
 
     const siteId = String(site.id);
 
-    // If we already have credentials for this site, switch silently
+    // If we already have credentials for this site (or we are a super admin with system-level creds), switch silently
     if (hasSiteCredentials(siteId)) {
       setCurrentSite(siteId);
       toast({
@@ -141,8 +141,8 @@ export function SiteSwitcher({
                   <Globe className="mr-2 h-4 w-4 opacity-70 flex-shrink-0" />
                   <span className="truncate flex-1">{site.name}</span>
                   {/* Show key icon if no credentials saved and not active */}
-                  {!hasCreds && !isActive && (
-                    <KeyRound className="ml-2 h-3 w-3 opacity-50 flex-shrink-0" title="Login required" />
+                  {!hasCreds && !isActive && !isSuperAdmin && (
+                    <KeyRound className="ml-2 h-3 w-3 opacity-50 flex-shrink-0" />
                   )}
                 </DropdownMenuItem>
               );

@@ -1,41 +1,30 @@
 /**
  * WP Leads API — site-aware version.
  *
- * Uses the current site's API base dynamically from localStorage
- * (read from SiteContext's persisted state), falling back to VITE_API_BASE.
+ * Reads the current site from the in-memory siteCache (populated by SiteContext
+ * on load from DB), falling back to VITE_API_BASE env variable.
  */
+import { getCurrentSiteFromCache } from '@/utils/siteCache';
 
 const ENV_API_BASE = import.meta.env.VITE_API_BASE;
 const ENV_API_KEY = import.meta.env.VITE_WP_API_KEY;
 
 /**
  * Derive the leads API base from the currently selected site.
- *
- * The leads plugin exposes a custom REST route at /wp-api on each site.
- * For example, the default site uses the relative path "/wp-api".
- * When a different site is selected, we prefix that site's URL to /wp-api.
  */
 function getApiBase(): string {
   try {
-    const currentSiteId = localStorage.getItem('crm_current_site_id');
-    const savedSites = localStorage.getItem('crm_wp_sites');
-    if (currentSiteId && savedSites) {
-      const sites = JSON.parse(savedSites);
-      const site = sites.find((s: any) => s.id === currentSiteId);
-      if (site?.url && !site.isDefault) {
-        // For non-default sites, we must hit the full URL.
-        // The custom CRM plugin endpoint is located at /wp-json/crm/v1 on the WordPress site.
-        // We cannot use /wp-api here because that is a local Vite proxy path.
-        let url = site.url.replace(/\/$/, '');
-        if (!url.includes('/wp-json')) url += '/wp-json';
-        return url + '/crm/v1';
-      }
+    const site = getCurrentSiteFromCache();
+    if (site?.url) {
+      let url = site.url.replace(/\/$/, '');
+      if (!url.includes('/wp-json')) url += '/wp-json';
+      return url + '/crm/v1';
     }
   } catch {
     // fall through
   }
-  // Default site or no site selected — use the env variable (/wp-api)
-  return ENV_API_BASE;
+  // Fallback to env variable if no site selected
+  return ENV_API_BASE || '';
 }
 
 /** Get the API key (same for all sites for now). */

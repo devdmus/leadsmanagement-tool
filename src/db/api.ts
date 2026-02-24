@@ -1,4 +1,5 @@
 import { wpLeadsApi } from './wpLeadsApi';
+import { getCurrentSiteFromCache } from '@/utils/siteCache';
 
 // Mock data generator for IDs
 const genId = () => Math.random().toString(36).substr(2, 9);
@@ -44,30 +45,22 @@ export const seoMetaTagsApi = {
 export const profilesApi = {
     async getAll() {
         try {
-            // Default setup
-            let apiBaseUrl = 'https://digitmarketus.com/Bhairavi/wp-json/wp/v2';
+            // Dynamic setup — reads from in-memory siteCache (populated by SiteContext on load)
+            let apiBaseUrl = '';
             let auth = '';
 
-            // Check for current site
-            const currentSiteId = localStorage.getItem('crm_current_site_id');
-            const savedSites = localStorage.getItem('crm_wp_sites');
+            const site = getCurrentSiteFromCache();
+            if (site) {
+                // Build wp/v2 base URL
+                if (site.url) {
+                    let url = site.url.replace(/\/$/, '');
+                    if (!url.includes('/wp-json')) url += '/wp-json';
+                    apiBaseUrl = url + '/wp/v2';
+                }
 
-            if (currentSiteId && savedSites) {
-                const sites = JSON.parse(savedSites);
-                const site = sites.find((s: any) => s.id === currentSiteId);
-
-                if (site) {
-                    // Update URL
-                    if (site.url) {
-                        let url = site.url.replace(/\/$/, '');
-                        if (!url.includes('/wp-json')) url += '/wp-json';
-                        apiBaseUrl = url + '/wp/v2';
-                    }
-
-                    // Check for site-specific credentials
-                    if (site.username && site.appPassword) {
-                        auth = 'Basic ' + btoa(`${site.username}:${site.appPassword}`);
-                    }
+                // Site-specific credentials stored in the siteCache
+                if (site.username && site.appPassword) {
+                    auth = 'Basic ' + btoa(`${site.username}:${site.appPassword}`);
                 }
             }
 
@@ -80,8 +73,8 @@ export const profilesApi = {
                 }
             }
 
-            // If we have auth, make the call
-            if (auth) {
+            // If we have both a site URL and auth, make the call
+            if (apiBaseUrl && auth) {
                 const res = await fetch(`${apiBaseUrl}/users?context=view`, {
                     headers: { 'Authorization': auth }
                 });

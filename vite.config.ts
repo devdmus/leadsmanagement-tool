@@ -19,11 +19,9 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/wp-api': {
-        target: 'https://digitmarketus.com/Bhairavi/wp-json/crm/v1',
+      '/api': {
+        target: 'http://localhost:3001',
         changeOrigin: true,
-        secure: false,
-        rewrite: (path) => path.replace(/^\/wp-api/, ''),
       },
     },
   },

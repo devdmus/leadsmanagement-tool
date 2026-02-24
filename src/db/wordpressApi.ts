@@ -7,14 +7,31 @@
  * The default export `wordpressApi` is still kept for backward compatibility
  * but new code should use `createWordPressApi` via the `useWordPressApi` hook.
  */
+import { getCurrentSiteFromCache } from '@/utils/siteCache';
 
-// Fallback defaults (used by the legacy export)
-const DEFAULT_WP_BASE_URL = 'https://digitmarketus.com/Bhairavi/wp-json/wp/v2';
-const DEFAULT_AUTH_HEADER = {
-  Authorization:
-    'Basic ' +
-    btoa('4ilwmh:syTRCaid5GHKm8xeWW1WeQ9X'),
-};
+// Dynamic defaults (used by the legacy export) — reads from current site cache
+function getDefaultWpBaseUrl(): string {
+  try {
+    const site = getCurrentSiteFromCache();
+    if (site?.url) {
+      let url = site.url.replace(/\/$/, '');
+      if (!url.includes('/wp-json')) url += '/wp-json';
+      return url + '/wp/v2';
+    }
+  } catch (_) { }
+  return '';
+}
+
+function getDefaultAuthHeader(): Record<string, string> {
+  try {
+    const saved = localStorage.getItem('wp_credentials');
+    if (saved) {
+      const creds = JSON.parse(saved);
+      return { Authorization: 'Basic ' + btoa(`${creds.username}:${creds.password}`) };
+    }
+  } catch (_) { }
+  return {};
+}
 
 interface WordPressPost {
   title: string;
@@ -82,7 +99,7 @@ export function createWordPressApi(wpBaseUrl: string, authHeader: Record<string,
   }
 
   // Derive the site root for custom endpoints (crm/v1)
-  // e.g. https://digitmarketus.com/Bhairavi/wp-json/wp/v2 → https://digitmarketus.com/Bhairavi/wp-json
+  // e.g. https://example.com/site/wp-json/wp/v2 → https://example.com/site/wp-json
   const WP_JSON_BASE = WP_BASE_URL.replace(/\/wp\/v2$/, '');
 
   const AUTH_HEADER = authHeader;
@@ -294,12 +311,21 @@ export function createWordPressApi(wpBaseUrl: string, authHeader: Record<string,
     },
 
     // ── Users ──────────────────────────────────────────────
-    async getUsers(role?: string, customHeaders?: Record<string, string>) {
-      let url = `${WP_BASE_URL}/users?per_page=100&context=edit`;
+    async getUsers(role?: string, customHeaders?: Record<string, string>, context: string = 'edit') {
+      let url = `${WP_BASE_URL}/users?per_page=100&context=${context}`;
       if (role) url += `&roles=${role}`;
 
       const res = await fetch(url, { headers: customHeaders || AUTH_HEADER });
-      if (!res.ok) throw new Error('Failed to fetch users');
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        console.error('Fetch Users Error:', {
+          status: res.status,
+          url: res.url,
+          context,
+          response: text.substring(0, 500)
+        });
+        throw new Error(`Failed to fetch users: ${res.status} ${res.statusText}`);
+      }
       return res.json();
     },
 
@@ -358,14 +384,66 @@ export function createWordPressApi(wpBaseUrl: string, authHeader: Record<string,
     },
 
     async getActivityLogs(page: number = 1, customHeaders?: Record<string, string>) {
-      const res = await fetch(`${WP_JSON_BASE}/crm/v1/logs?page=${page}`, {
+      const url = `${WP_JSON_BASE}/crm/v1/logs?page=${page}`;
+      const res = await fetch(url, {
         headers: customHeaders || AUTH_HEADER,
       });
 
       if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        console.error('Fetch Activity Logs Error:', {
+          status: res.status,
+          url: res.url,
+          response: text.substring(0, 500)
+        });
         if (res.status === 403) throw new Error('You do not have permission to view logs');
-        throw new Error('Failed to fetch activity logs');
+        throw new Error(`Failed to fetch logs: ${res.status} ${res.statusText}`);
       }
+      return res.json();
+    },
+
+    // ── IP Whitelist (crm/v1) ─────────────────────────────
+    async getIPWhitelist(customHeaders?: Record<string, string>) {
+      const res = await fetch(`${WP_JSON_BASE}/crm/v1/ip-whitelist`, {
+        headers: customHeaders || AUTH_HEADER,
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(`IP whitelist fetch failed (HTTP ${res.status}): ${body.slice(0, 120)}`);
+      }
+      return res.json() as Promise<any[]>;
+    },
+
+    async addIPWhitelist(entry: {
+      id: string;
+      ip: string;
+      userId: string;
+      username: string;
+      label: string;
+      addedBy: string;
+      addedAt: string;
+    }, customHeaders?: Record<string, string>) {
+      const res = await fetch(`${WP_JSON_BASE}/crm/v1/ip-whitelist`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(customHeaders || AUTH_HEADER),
+        },
+        body: JSON.stringify(entry),
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(`Failed to add IP (HTTP ${res.status}): ${body.slice(0, 120)}`);
+      }
+      return res.json();
+    },
+
+    async deleteIPWhitelist(id: string, customHeaders?: Record<string, string>) {
+      const res = await fetch(`${WP_JSON_BASE}/crm/v1/ip-whitelist/${id}`, {
+        method: 'DELETE',
+        headers: customHeaders || AUTH_HEADER,
+      });
+      if (!res.ok) throw new Error('Failed to remove IP from whitelist');
       return res.json();
     },
 
@@ -394,7 +472,10 @@ export function createWordPressApi(wpBaseUrl: string, authHeader: Record<string,
 }
 
 // ─── Legacy default export (backward compat) ────────────────────────────
-export const wordpressApi = createWordPressApi(
-  DEFAULT_WP_BASE_URL,
-  DEFAULT_AUTH_HEADER
-);
+// Uses a Proxy so that each call dynamically reads the current site & credentials.
+export const wordpressApi = new Proxy({} as ReturnType<typeof createWordPressApi>, {
+  get(_target, prop) {
+    const api = createWordPressApi(getDefaultWpBaseUrl(), getDefaultAuthHeader());
+    return (api as any)[prop];
+  },
+});

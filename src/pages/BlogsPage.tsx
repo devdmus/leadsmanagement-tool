@@ -710,12 +710,20 @@ export default function BlogsPage() {
   };
   // added filtering logic for blogs based on status and category
 
+  // Team member filter: only show their own blogs
+  const teamRoles = ['sales_person', 'seo_person', 'client'];
+  const isTeamMember = profile && teamRoles.includes(profile.role);
+
   // Filter blogs
   // Normalize status for filtering (WordPress statuses: draft, private, pending, future, publish)
   const filteredBlogs = blogs.filter(blog => {
-    const matchesStatus =
-      statusFilter === 'all' ||
-      blog.status === statusFilter;
+    // Team members only see blogs assigned to them or authored by them
+    if (isTeamMember && profile) {
+      const isAssigned = blog.assigned_to === profile.id;
+      const isAuthor = blog.author_id === profile.id;
+      if (!isAssigned && !isAuthor) return false;
+    }
+    const matchesStatus = statusFilter === 'all' || blog.status === statusFilter;
     const matchesCategory = categoryFilter === 'all' || blog.category === categoryFilter;
     return matchesStatus && matchesCategory;
   });

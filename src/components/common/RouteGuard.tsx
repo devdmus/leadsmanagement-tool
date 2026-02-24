@@ -6,8 +6,19 @@ interface RouteGuardProps {
   children: React.ReactNode;
 }
 
-// Please add the pages that can be accessed without logging in to PUBLIC_ROUTES.
 const PUBLIC_ROUTES = ['/login', '/403', '/404'];
+
+// Map routes to feature permission requirements
+const ROUTE_FEATURE_MAP: Record<string, { feature: string; permission: 'read' | 'write' }> = {
+  '/leads': { feature: 'leads', permission: 'read' },
+  '/seo': { feature: 'seo_meta_tags', permission: 'read' },
+  '/blogs': { feature: 'blogs', permission: 'read' },
+  '/sites': { feature: 'sites', permission: 'read' },
+  '/ip-security': { feature: 'ip_security', permission: 'read' },
+  '/users': { feature: 'users', permission: 'read' },
+  '/activity': { feature: 'activity_logs', permission: 'read' },
+  '/subscription': { feature: 'subscriptions', permission: 'read' },
+};
 
 function matchPublicRoute(path: string, patterns: string[]) {
   return patterns.some(pattern => {
@@ -20,7 +31,7 @@ function matchPublicRoute(path: string, patterns: string[]) {
 }
 
 export function RouteGuard({ children }: RouteGuardProps) {
-  const { profile, loading } = useAuth();
+  const { profile, loading, hasPermission } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -31,8 +42,24 @@ export function RouteGuard({ children }: RouteGuardProps) {
 
     if (!profile && !isPublic) {
       navigate('/login', { state: { from: location.pathname }, replace: true });
+      return;
     }
-  }, [profile, loading, location.pathname, navigate]);
+
+    if (profile) {
+      // Permissions page: super_admin only
+      if (location.pathname === '/permissions' && profile.role !== 'super_admin') {
+        navigate('/', { replace: true });
+        return;
+      }
+
+      // Feature-level route guard
+      const routeConfig = ROUTE_FEATURE_MAP[location.pathname];
+      if (routeConfig && !hasPermission(routeConfig.feature, routeConfig.permission)) {
+        navigate('/', { replace: true });
+        return;
+      }
+    }
+  }, [profile, loading, location.pathname, navigate, hasPermission]);
 
   if (loading) {
     return (
