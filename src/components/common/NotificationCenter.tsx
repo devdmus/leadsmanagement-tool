@@ -9,6 +9,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { useAuth } from '@/contexts/AuthContext';
+import { useSite } from '@/contexts/SiteContext';
 // Supabase removed
 import { cn } from '@/lib/utils';
 
@@ -29,38 +30,70 @@ export function NotificationCenter() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [open, setOpen] = useState(false);
-  const { profile } = useAuth();
+  const { profile, userType } = useAuth();
+  const { currentSite } = useSite();
 
   useEffect(() => {
     if (profile) {
       loadNotifications();
-      subscribeToNotifications();
+      const interval = setInterval(loadNotifications, 30000); // Poll every 30s
+      return () => clearInterval(interval);
     }
-  }, [profile]);
+  }, [profile, currentSite?.id]);
 
   const loadNotifications = async () => {
-    // Mock notifications
-    setNotifications([]);
-    setUnreadCount(0);
-  };
+    try {
+      if (!profile) return;
 
-  const subscribeToNotifications = () => {
-    // Mock subscription
-    return () => { };
+      const userId = userType === 'super_admin' ? profile.id.toString() : profile.id;
+      const isSuperAdmin = userType === 'super_admin';
+
+      const data = await import('@/db/api').then(m => m.notificationsApi.getAll(
+        userId,
+        currentSite?.id,
+        isSuperAdmin
+      ));
+
+      const normalizedData = (data || []).map((n: any) => ({
+        ...n,
+        is_read: n.is_read === true || n.is_read === 1 || n.is_read === '1'
+      }));
+
+      setNotifications(normalizedData);
+      setUnreadCount(normalizedData.filter((n: any) => !n.is_read).length);
+    } catch (error) {
+      console.error('Failed to load notifications:', error);
+    }
   };
 
   const markAsRead = async (notificationId: string) => {
-    setNotifications(notifications.map(n => n.id === notificationId ? { ...n, is_read: true } : n));
-    setUnreadCount(prev => Math.max(0, prev - 1));
+    try {
+      await import('@/db/api').then(m => m.notificationsApi.markAsRead(notificationId));
+      setNotifications(notifications.map(n => n.id === notificationId ? { ...n, is_read: true } : n));
+      setUnreadCount(prev => Math.max(0, prev - 1));
+    } catch (error) {
+      console.error('Failed to mark as read:', error);
+    }
   };
 
   const markAllAsRead = async () => {
-    setNotifications(notifications.map(n => ({ ...n, is_read: true })));
-    setUnreadCount(0);
+    try {
+      const unread = notifications.filter(n => !n.is_read);
+      await Promise.all(unread.map(n => import('@/db/api').then(m => m.notificationsApi.markAsRead(n.id))));
+      setNotifications(notifications.map(n => ({ ...n, is_read: true })));
+      setUnreadCount(0);
+    } catch (error) {
+      console.error('Failed to mark all as read:', error);
+    }
   };
 
   const deleteNotification = async (notificationId: string) => {
-    setNotifications(notifications.filter(n => n.id !== notificationId));
+    try {
+      await import('@/db/api').then(m => m.notificationsApi.delete?.(notificationId));
+      setNotifications(notifications.filter(n => n.id !== notificationId));
+    } catch (error) {
+      console.error('Failed to delete notification:', error);
+    }
   };
 
   const getTypeColor = (type: string) => {
@@ -81,7 +114,7 @@ export function NotificationCenter() {
       <PopoverTrigger asChild>
         {/* changed css */}
         <Button variant="ghost" size="icon" className="relative hover:bg-muted/30">
-          {/* css changed  */} 
+          {/* css changed  */}
           <Bell className="h-5 w-5 text-white " />
           {unreadCount > 0 && (
             <Badge

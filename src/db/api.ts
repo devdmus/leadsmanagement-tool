@@ -45,62 +45,30 @@ export const seoMetaTagsApi = {
 export const profilesApi = {
     async getAll() {
         try {
-            // Dynamic setup — reads from in-memory siteCache (populated by SiteContext on load)
-            let apiBaseUrl = '';
-            let auth = '';
-
             const site = getCurrentSiteFromCache();
-            if (site) {
-                // Build wp/v2 base URL
-                if (site.url) {
-                    let url = site.url.replace(/\/$/, '');
-                    if (!url.includes('/wp-json')) url += '/wp-json';
-                    apiBaseUrl = url + '/wp/v2';
-                }
+            if (site?.url) {
+                let url = site.url.replace(/\/$/, '');
+                if (!url.includes('/wp-json')) url += '/wp-json';
+                const apiBaseUrl = `${url}/crm/v1`;
+                const apiKey = import.meta.env.VITE_WP_API_KEY;
 
-                // Site-specific credentials stored in the siteCache
-                if (site.username && site.appPassword) {
-                    auth = 'Basic ' + btoa(`${site.username}:${site.appPassword}`);
-                }
-            }
-
-            // Fallback to global credentials if no site-specific auth found
-            if (!auth) {
-                const saved = localStorage.getItem('wp_credentials');
-                if (saved) {
-                    const creds = JSON.parse(saved);
-                    auth = 'Basic ' + btoa(`${creds.username}:${creds.password}`);
-                }
-            }
-
-            // If we have both a site URL and auth, make the call
-            if (apiBaseUrl && auth) {
-                const res = await fetch(`${apiBaseUrl}/users?context=view`, {
-                    headers: { 'Authorization': auth }
-                });
-
-
+                const res = await fetch(`${apiBaseUrl}/users?api_key=${apiKey}&_=${Date.now()}`);
                 if (res.ok) {
-                    const wpUsers = await res.json();
-                    return wpUsers.map((u: any) => {
-                        let role = 'client';
-                        if (u.roles?.includes('administrator')) role = 'admin';
-                        else if (u.roles?.includes('editor') || u.roles?.includes('seo_manager')) role = 'seo';
-                        else if (u.roles?.includes('author') || u.roles?.includes('contributor')) role = 'sales';
+                    const profiles = await res.json();
 
-                        return {
-                            id: u.id.toString(),
-                            username: u.name || u.slug,
-                            email: u.email || '',
-                            role: role,
-                            created_at: new Date().toISOString(),
-                            updated_at: new Date().toISOString()
-                        };
-                    });
+                    // Cache the successful fetch to help with fallback (e.g. if site is temporarily down)
+                    sessionStorage.setItem('crm_profiles_cache', JSON.stringify(profiles));
+                    return profiles;
                 }
             }
         } catch (e) {
-            console.warn('Failed to fetch WP users, falling back to mocks', e);
+            console.warn('Failed to fetch CRM users, falling back to cache or mocks', e);
+        }
+
+        // Try to load from session cache before falling back to mocks
+        const cached = sessionStorage.getItem('crm_profiles_cache');
+        if (cached) {
+            return JSON.parse(cached);
         }
 
         return [
@@ -110,8 +78,17 @@ export const profilesApi = {
         ];
     },
     async getById(id: string) {
+        if (!id) return null;
         const users = await this.getAll();
-        return users.find((u: any) => u.id === id) || { id, username: 'User ' + id, role: 'sales' };
+        const user = users.find((u: any) => u.id === id.toString());
+        if (user) return user;
+
+        // Return a placeholder if not found so the ID is preserved in the UI
+        return {
+            id: id.toString(),
+            username: `User ${id}`,
+            role: 'unknown'
+        };
     }
 };
 
@@ -148,66 +125,102 @@ export const activityLogsApi = {
 
 // Notes API
 export const notesApi = {
-    async getByLeadId(leadId: string) {
-        const notes = getLS('crm_notes');
-        return notes.filter((n: any) => n.lead_id === leadId);
+    async getByLeadId(leadId: string, _siteId?: string) {
+        const lead = await leadsApi.getById(leadId);
+        return lead.notes ? [{
+            id: 'legacy-note',
+            lead_id: leadId,
+            content: lead.notes,
+            created_at: lead.updated_at || lead.created_at
+        }] : [];
     },
     async create(data: any) {
-        const notes = getLS('crm_notes');
-        const newNote = { id: genId(), ...data, created_at: new Date().toISOString() };
-        notes.unshift(newNote);
-        setLS('crm_notes', notes);
-        return newNote;
+        return this.update(data.lead_id, data);
     },
-    async update(id: string, data: any) {
-        const notes = getLS('crm_notes');
-        const idx = notes.findIndex((n: any) => n.id === id);
-        if (idx > -1) {
-            notes[idx] = { ...notes[idx], ...data };
-            setLS('crm_notes', notes);
-            return notes[idx];
-        }
-        return { id, ...data };
+    async update(leadId: string, data: any) {
+        const lead = await leadsApi.update(leadId, { notes: data.content || data.notes });
+        return {
+            id: 'legacy-note',
+            lead_id: leadId,
+            content: lead.notes || data.content,
+            created_at: new Date().toISOString()
+        };
     },
-    async delete(id: string) {
-        let notes = getLS('crm_notes');
-        notes = notes.filter((n: any) => n.id !== id);
-        setLS('crm_notes', notes);
+    async delete(_id: string) {
+        // We can't easily delete just the note via this API without knowing the lead ID
+        // In the new system, deleting a note is just updating it to empty
+        console.warn('Delete note called, please use update with empty content');
         return { success: true };
     }
 };
 
 // Follow-ups API
 export const followUpsApi = {
-    async getAll() {
-        return getLS('crm_followups');
+    async getAll(_siteId?: string) {
+        const leads = await leadsApi.getAll();
+        return leads
+            .filter((l: any) => l.follow_up_date)
+            .map((l: any) => ({
+                id: `fu-${l.id}`,
+                lead_id: l.id,
+                follow_up_date: l.follow_up_date,
+                status: l.follow_up_status,
+                type: l.follow_up_type,
+                notes: l.notes
+            }));
     },
-    async getByLead(leadId: string) {
-        const items = getLS('crm_followups');
-        return items.filter((i: any) => i.lead_id === leadId);
+    async getByLead(leadId: string, _siteId?: string) {
+        const lead = await leadsApi.getById(leadId);
+        if (!lead.follow_up_date) return [];
+        return [{
+            id: `fu-${leadId}`,
+            lead_id: leadId,
+            follow_up_date: lead.follow_up_date,
+            status: lead.follow_up_status,
+            type: lead.follow_up_type,
+            notes: lead.notes
+        }];
     },
     async create(data: any) {
-        const items = getLS('crm_followups');
-        const newItem = { id: genId(), ...data, created_at: new Date().toISOString() };
-        items.unshift(newItem);
-        setLS('crm_followups', items);
-        return newItem;
+        await leadsApi.update(data.lead_id, {
+            follow_up_date: data.follow_up_date,
+            follow_up_status: 'pending',
+            follow_up_type: data.type || 'call'
+        });
+        return { id: `fu-${data.lead_id}`, ...data };
     },
     async update(id: string, data: any) {
-        const items = getLS('crm_followups');
-        const idx = items.findIndex((i: any) => i.id === id);
-        if (idx > -1) {
-            items[idx] = { ...items[idx], ...data };
-            setLS('crm_followups', items);
-            return items[idx];
-        }
+        // ID is likely fu-{leadId}
+        const leadId = id.replace('fu-', '');
+        await leadsApi.update(leadId, {
+            follow_up_date: data.follow_up_date,
+            follow_up_status: data.status,
+            follow_up_type: data.type,
+            notes: data.notes
+        });
         return { id, ...data };
     },
-    async delete(id: string) {
-        let items = getLS('crm_followups');
-        items = items.filter((i: any) => i.id !== id);
-        setLS('crm_followups', items);
+    async delete(fuId: string) {
+        const leadId = fuId.replace('fu-', '');
+        await leadsApi.update(leadId, {
+            follow_up_date: null,
+            follow_up_status: 'pending'
+        });
         return { success: true };
+    },
+    async getDue(_siteId?: string) {
+        const leads = await leadsApi.getAll();
+        const now = new Date();
+        return leads
+            .filter((l: any) => l.follow_up_date && new Date(l.follow_up_date) <= now && l.follow_up_status === 'pending')
+            .map((l: any) => ({
+                id: `fu-${l.id}`,
+                lead_id: l.id,
+                follow_up_date: l.follow_up_date,
+                status: l.follow_up_status,
+                type: l.follow_up_type,
+                notes: l.notes
+            }));
     }
 };
 
@@ -332,26 +345,67 @@ export const chatApi = {
     }
 };
 
-// Notifications API Mock
+// Notifications API (WordPress-based)
 export const notificationsApi = {
-    async getAll() {
-        return getLS('crm_notifications');
+    async getAll(userId: string, siteId?: string, isSuperAdmin: boolean = false) {
+        const site = getCurrentSiteFromCache();
+        if (!site?.url) return [];
+
+        let url = site.url.replace(/\/$/, '');
+        if (!url.includes('/wp-json')) url += '/wp-json';
+        const apiBaseUrl = `${url}/crm/v1`;
+        const apiKey = import.meta.env.VITE_WP_API_KEY;
+
+        const res = await fetch(`${apiBaseUrl}/notifications?userId=${userId}&isSuperAdmin=${isSuperAdmin}&api_key=${apiKey}`);
+        if (!res.ok) throw new Error('Failed to fetch notifications');
+        return res.json();
     },
     async create(data: any) {
-        const items = getLS('crm_notifications');
-        const newItem = { id: genId(), ...data, created_at: new Date().toISOString(), is_read: false };
-        items.unshift(newItem);
-        setLS('crm_notifications', items);
-        return newItem;
+        const site = getCurrentSiteFromCache();
+        if (!site?.url) throw new Error('No site selected');
+
+        let url = site.url.replace(/\/$/, '');
+        if (!url.includes('/wp-json')) url += '/wp-json';
+        const apiBaseUrl = `${url}/crm/v1`;
+        const apiKey = import.meta.env.VITE_WP_API_KEY;
+
+        const res = await fetch(`${apiBaseUrl}/notifications?api_key=${apiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        if (!res.ok) throw new Error('Failed to create notification');
+        return res.json();
     },
     async markAsRead(id: string) {
-        const items = getLS('crm_notifications');
-        const idx = items.findIndex((i: any) => i.id === id);
-        if (idx > -1) {
-            items[idx].is_read = true;
-            setLS('crm_notifications', items);
-        }
-        return { success: true };
+        const site = getCurrentSiteFromCache();
+        if (!site?.url) throw new Error('No site selected');
+
+        let url = site.url.replace(/\/$/, '');
+        if (!url.includes('/wp-json')) url += '/wp-json';
+        const apiBaseUrl = `${url}/crm/v1`;
+        const apiKey = import.meta.env.VITE_WP_API_KEY;
+
+        const res = await fetch(`${apiBaseUrl}/notifications/${id}/read?api_key=${apiKey}`, {
+            method: 'PATCH'
+        });
+        if (!res.ok) throw new Error('Failed to mark notification as read');
+        return res.json();
+    },
+    async delete(id: string) {
+        const site = getCurrentSiteFromCache();
+        if (!site?.url) throw new Error('No site selected');
+
+        let url = site.url.replace(/\/$/, '');
+        if (!url.includes('/wp-json')) url += '/wp-json';
+        const apiBaseUrl = `${url}/crm/v1`;
+        const apiKey = import.meta.env.VITE_WP_API_KEY;
+
+        const res = await fetch(`${apiBaseUrl}/notifications/${id}?api_key=${apiKey}`, {
+            method: 'DELETE'
+        });
+        if (!res.ok) throw new Error('Failed to delete notification');
+        return res.json();
     },
     async notifyAllAdmins(data: any) {
         return this.create({ ...data, role_target: 'admin' });

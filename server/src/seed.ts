@@ -83,12 +83,11 @@ async function seed() {
       ip_address VARCHAR(45),
       user_agent VARCHAR(500),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      expires_at TIMESTAMP NOT NULL,
+      expires_at DATETIME NOT NULL,
       invalidated_at TIMESTAMP NULL,
       UNIQUE KEY unique_token (token_hash),
       INDEX idx_user_active (user_id, user_type, is_active),
       INDEX idx_token_active (token_hash, is_active)
-    )
   `);
 
   // Seed super admin
@@ -96,7 +95,7 @@ async function seed() {
   const passwordHash = await bcrypt.hash('admin123', 10);
 
   await conn.execute(
-    `INSERT INTO super_admins (username, email, password_hash) VALUES (?, ?, ?)
+    `INSERT INTO super_admins(username, email, password_hash) VALUES(?, ?, ?)
      ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash)`,
     ['superadmin', 'superadmin@crm.local', passwordHash]
   );
@@ -180,7 +179,7 @@ async function seed() {
     for (const feature of features) {
       const perm = defaultPerms[role]?.[feature] ?? { r: false, w: false };
       await conn.execute(
-        `INSERT INTO role_permissions (role, feature, can_read, can_write) VALUES (?, ?, ?, ?)
+        `INSERT INTO role_permissions(role, feature, can_read, can_write) VALUES(?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE can_read = VALUES(can_read), can_write = VALUES(can_write)`,
         [role, feature, perm.r, perm.w]
       );

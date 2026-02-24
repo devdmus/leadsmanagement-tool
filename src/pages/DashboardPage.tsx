@@ -1,15 +1,25 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { wpLeadsApi } from '@/db/wpLeadsApi';
+import { followUpsApi } from '@/db/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Users, CheckCircle, UserRoundCheck, AlertCircle, TriangleAlert, BellRing } from 'lucide-react';
+import { Users, UserRoundCheck, TriangleAlert, BellRing, Clock } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useSite } from '@/contexts/SiteContext';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { useNavigate } from 'react-router-dom';
+import { notificationHelper } from '@/lib/notificationHelper';
+import { useAuth } from '@/contexts/AuthContext';
+import { useToast } from '@/hooks/use-toast';
 
 const COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))'];
 
 export default function DashboardPage() {
   const { currentSite } = useSite();
+  const { profile } = useAuth();
+  const { toast } = useToast();
+  const navigate = useNavigate();
 
   const [stats, setStats] = useState<{
     total: number;
@@ -18,12 +28,23 @@ export default function DashboardPage() {
     remainder: number;
     bySource: Record<string, number>;
   } | null>(null);
+  const [dueFollowUps, setDueFollowUps] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
     loadStats();
+    loadFollowUps();
   }, [currentSite?.id]);
+
+  const loadFollowUps = async () => {
+    try {
+      const due = await followUpsApi.getDue(currentSite?.id);
+      setDueFollowUps(due);
+    } catch (error) {
+      console.error('Failed to load due follow-ups:', error);
+    }
+  };
 
   const loadStats = async () => {
     try {
@@ -97,9 +118,29 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div>
-        <h1 className="text-3xl font-bold">Dashboard</h1>
-        <p className="text-muted-foreground">Overview of your marketing leads</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Dashboard</h1>
+          <p className="text-muted-foreground">Overview of your marketing leads</p>
+        </div>
+        <Button
+          variant="outline"
+          onClick={async () => {
+            if (profile) {
+              await notificationHelper.notifyUser(
+                profile.id.toString(),
+                'Test Notification',
+                'This is a test notification to verify the bell icon alert.',
+                'info',
+                'test'
+              );
+              toast({ title: "Test Alert Sent", description: "Refresh or wait for the poll to see the bell icon update." });
+            }
+          }}
+        >
+          <BellRing className="h-4 w-4 mr-2" />
+          Send Test Alert
+        </Button>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -155,6 +196,42 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {dueFollowUps.length > 0 && (
+        <Card className="border-info/50 bg-info/5">
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2">
+              <BellRing className="h-5 w-5 text-info animate-bounce" />
+              <CardTitle>Due For Follow-up</CardTitle>
+            </div>
+            <CardDescription>Scheduled tasks that need attention right now</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {dueFollowUps.slice(0, 6).map((fu) => (
+                <div key={fu.id} className="flex items-center justify-between p-3 border rounded-lg bg-background hover:border-info transition-colors">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium leading-none">Lead ID: {fu.lead_id}</p>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Clock className="h-3 w-3" />
+                      <span>{new Date(fu.follow_up_date).toLocaleString()}</span>
+                      <Badge variant="outline" className="text-[10px] py-0">{fu.type}</Badge>
+                    </div>
+                  </div>
+                  <Button size="sm" variant="ghost" onClick={() => navigate(`/leads/${fu.lead_id}`)}>
+                    View
+                  </Button>
+                </div>
+              ))}
+            </div>
+            {dueFollowUps.length > 6 && (
+              <p className="text-xs text-center text-muted-foreground mt-4">
+                And {dueFollowUps.length - 6} more follow-ups due...
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-4 md:grid-cols-2">
         <Card className="hover:shadow-lg transition-shadow">
