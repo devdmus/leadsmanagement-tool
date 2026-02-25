@@ -58,9 +58,10 @@ export const wpLeadsApi = {
     console.log(`[wpLeadsApi] Fetched ${remoteLeads.length} leads from ${API_BASE}`);
 
     const localUpdates = getLocalUpdates();
+    let hasChanges = false;
 
     // Merge remote data with local overrides and normalize IDs
-    return remoteLeads.map((lead: any) => {
+    const mergedLeads = remoteLeads.map((lead: any) => {
       const lid = lead.id.toString();
 
       // Normalize source (fix potential backend typo)
@@ -74,14 +75,33 @@ export const wpLeadsApi = {
         source,
         status: lead.status || 'pending', // Default status if missing
         assigned_to: lead.assigned_to ? lead.assigned_to.toString() : null,
-        created_at: lead.created_at || new Date().toISOString()
+        created_at: lead.created_at || new Date().toISOString(),
+        notes: lead.notes || '',
+        follow_up_date: lead.follow_up_date || null,
+        follow_up_status: lead.follow_up_status || 'pending',
+        follow_up_type: lead.follow_up_type || 'call'
       };
 
+      // Sync Check: If server lead has newer updated_at than our local record, clear our local record
       if (localUpdates[lid]) {
+        const localTime = new Date(localUpdates[lid]._updated_at).getTime();
+        const remoteTime = new Date(lead.updated_at || 0).getTime();
+
+        if (remoteTime >= localTime) {
+          delete localUpdates[lid];
+          hasChanges = true;
+          return normalizedLead;
+        }
         return { ...normalizedLead, ...localUpdates[lid] };
       }
       return normalizedLead;
     });
+
+    if (hasChanges) {
+      localStorage.setItem('crm_leads_local_updates', JSON.stringify(localUpdates));
+    }
+
+    return mergedLeads;
   },
 
   async getById(id: string) {
@@ -105,7 +125,11 @@ export const wpLeadsApi = {
           source,
           status: lead.status || 'pending',
           assigned_to: lead.assigned_to ? lead.assigned_to.toString() : null,
-          created_at: lead.created_at || new Date().toISOString()
+          created_at: lead.created_at || new Date().toISOString(),
+          notes: lead.notes || '',
+          follow_up_date: lead.follow_up_date || null,
+          follow_up_status: lead.follow_up_status || 'pending',
+          follow_up_type: lead.follow_up_type || 'call'
         };
 
         if (localUpdates[lid]) {

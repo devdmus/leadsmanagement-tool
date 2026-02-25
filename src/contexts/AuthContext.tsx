@@ -25,6 +25,7 @@ interface AuthContextType {
   logActivity: (action: string, details: string) => Promise<void>;
   getSiteCredentials: (siteId: string) => { username: string; password: string } | null;
   hasSiteCredentials: (siteId: string) => boolean;
+  userType: 'super_admin' | 'wp_user' | null;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -573,6 +574,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logActivity,
       getSiteCredentials,
       hasSiteCredentials,
+      userType: isSuperAdmin ? 'super_admin' : (profile ? 'wp_user' : null),
     }}>
       {children}
     </AuthContext.Provider>
