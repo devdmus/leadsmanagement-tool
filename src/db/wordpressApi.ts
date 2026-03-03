@@ -379,14 +379,14 @@ export function createWordPressApi(wpBaseUrl: string, authHeader: Record<string,
     },
 
     // ── Custom endpoints (crm/v1) ─────────────────────────
-    async logActivity(action: string, details: string, customHeaders?: Record<string, string>) {
+    async logActivity(action: string, details: string, customHeaders?: Record<string, string>, extra?: Record<string, any>) {
       const res = await fetch(`${WP_JSON_BASE}/crm/v1/log`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(customHeaders || AUTH_HEADER),
         },
-        body: JSON.stringify({ action, details }),
+        body: JSON.stringify({ action, details, ...(extra || {}) }),
       });
 
       if (!res.ok) {

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { UserSearchSelect } from '@/components/common/UserSearchSelect';
 import { useParams, useNavigate } from 'react-router-dom';
 import { wpLeadsApi as leadsApi } from '@/db/wpLeadsApi';
 // @ts-ignore
@@ -170,23 +171,22 @@ export default function LeadDetailPage() {
               details: { field, value },
             });
 
-            await notificationHelper.notifyUserAndAdmins(
-              profile.id as string,
-              'Lead Updated',
-              `Lead "${lead?.name}" ${field} has been updated.`,
-              'success',
-              'lead_updated',
-              'lead',
-              id
-            );
-
             if (field === 'assigned_to' && updateValue) {
-              await notificationHelper.notifyUser(
+              await notificationHelper.notifyAssignment(
                 updateValue,
                 'New Lead Assigned',
                 `You have been assigned to lead "${lead?.name}".`,
                 'info',
                 'lead_assigned',
+                'lead',
+                id
+              );
+            } else {
+              await notificationHelper.notifyAdmins(
+                'Lead Updated',
+                `Lead "${lead?.name}" ${field} has been updated.`,
+                'success',
+                'lead_updated',
                 'lead',
                 id
               );
@@ -603,23 +603,12 @@ export default function LeadDetailPage() {
 
             <div className="space-y-2">
               <Label htmlFor="assigned_to">Assigned To</Label>
-              <Select
+              <UserSearchSelect
+                users={users}
                 value={lead.assigned_to || 'unassigned'}
                 onValueChange={(value) => handleUpdateLead('assigned_to', value)}
                 disabled={!hasPermission('leads', 'write')}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select user" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="unassigned">Unassigned</SelectItem>
-                  {users.map((user) => (
-                    <SelectItem key={user.id} value={user.id}>
-                      {user.username} ({user.role})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              />
             </div>
 
             <div className="space-y-2">

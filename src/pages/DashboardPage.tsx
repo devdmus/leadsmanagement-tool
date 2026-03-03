@@ -17,7 +17,7 @@ const COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3
 
 export default function DashboardPage() {
   const { currentSite } = useSite();
-  const { profile } = useAuth();
+  const { profile, userType } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -123,24 +123,31 @@ export default function DashboardPage() {
           <h1 className="text-3xl font-bold">Dashboard</h1>
           <p className="text-muted-foreground">Overview of your marketing leads</p>
         </div>
-        <Button
-          variant="outline"
-          onClick={async () => {
-            if (profile) {
-              await notificationHelper.notifyUser(
-                profile.id.toString(),
-                'Test Notification',
-                'This is a test notification to verify the bell icon alert.',
-                'info',
-                'test'
-              );
-              toast({ title: "Test Alert Sent", description: "Refresh or wait for the poll to see the bell icon update." });
-            }
-          }}
-        >
-          <BellRing className="h-4 w-4 mr-2" />
-          Send Test Alert
-        </Button>
+        {/* Send Test Alert — super_admin only */}
+        {profile?.role === 'super_admin' && (
+          <Button
+            variant="outline"
+            onClick={async () => {
+              if (profile) {
+                const prefix = userType === 'super_admin' ? 'sa' : 'wp';
+                await notificationHelper.notifyUser(
+                  profile.id.toString(),
+                  'Test Notification',
+                  'This is a test notification to verify the bell icon alert.',
+                  'info',
+                  'test',
+                  undefined,
+                  undefined,
+                  prefix
+                );
+                toast({ title: "Test Alert Sent", description: "Refresh or wait for the poll to see the bell icon update." });
+              }
+            }}
+          >
+            <BellRing className="h-4 w-4 mr-2" />
+            Send Test Alert
+          </Button>
+        )}
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">

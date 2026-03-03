@@ -53,6 +53,8 @@ export type Lead = {
 export type SeoMetaTag = {
   id: string;
   page_identifier: string;
+  post_id?: string;
+  rest_base?: string;
   title: string;
   keywords: string | null;
   description: string | null;

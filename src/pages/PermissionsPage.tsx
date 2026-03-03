@@ -27,7 +27,7 @@ type PermissionState = Record<string, RolePermissions>;
 
 const CONFIGURABLE_ROLES = [
   { key: 'admin', label: 'Admin', color: 'bg-blue-600' },
-  { key: 'lead_manager', label: 'Lead Manager', color: 'bg-orange-600' },
+  { key: 'lead_manager', label: 'Sales Manager', color: 'bg-orange-600' },
   { key: 'seo_manager', label: 'SEO Manager', color: 'bg-purple-600' },
   { key: 'sales_person', label: 'Sales Person', color: 'bg-green-600' },
   { key: 'seo_person', label: 'SEO Person', color: 'bg-indigo-600' },

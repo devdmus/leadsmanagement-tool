@@ -49,6 +49,21 @@ async function seed() {
   `);
 
   await conn.query(`
+    CREATE TABLE IF NOT EXISTS super_admin_activity_logs (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      admin_id INT NOT NULL,
+      username VARCHAR(100) NOT NULL,
+      action VARCHAR(100) NOT NULL,
+      details TEXT NOT NULL,
+      ip_address VARCHAR(45) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      KEY idx_admin_id (admin_id),
+      KEY idx_action (action),
+      KEY idx_created_at (created_at)
+    )
+  `);
+
+  await conn.query(`
     CREATE TABLE IF NOT EXISTS user_site_assignments (
       id INT AUTO_INCREMENT PRIMARY KEY,
       wp_user_id VARCHAR(50) NOT NULL,
@@ -88,7 +103,7 @@ async function seed() {
       UNIQUE KEY unique_token (token_hash),
       INDEX idx_user_active (user_id, user_type, is_active),
       INDEX idx_token_active (token_hash, is_active)
-  `);
+  )`);
 
   // Seed super admin
   console.log('Seeding super admin...');
@@ -180,7 +195,7 @@ async function seed() {
       const perm = defaultPerms[role]?.[feature] ?? { r: false, w: false };
       await conn.execute(
         `INSERT INTO role_permissions(role, feature, can_read, can_write) VALUES(?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE can_read = VALUES(can_read), can_write = VALUES(can_write)`,
+         ON DUPLICATE KEY UPDATE id = id`,
         [role, feature, perm.r, perm.w]
       );
     }

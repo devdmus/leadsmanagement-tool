@@ -11,19 +11,93 @@ const setLS = (key: string, data: any) => localStorage.setItem(key, JSON.stringi
 // Leads API (Pointing to wpLeadsApi)
 export const leadsApi = wpLeadsApi;
 
-// SEO Meta Tags API Mock
+// SEO Meta Tags API — uses WordPress REST API (server-side storage shared across all users)
+// Falls back to localStorage if the WP endpoint is unavailable.
 export const seoMetaTagsApi = {
+    _getBase(): string {
+        const site = getCurrentSiteFromCache();
+        if (site?.url) {
+            let url = site.url.replace(/\/$/, '');
+            if (!url.includes('/wp-json')) url += '/wp-json';
+            return url + '/crm/v1';
+        }
+        return '';
+    },
+    _getKey(): string {
+        return (import.meta as any).env?.VITE_WP_API_KEY || 'SECRET123';
+    },
+
     async getAll() {
+        const base = this._getBase();
+        if (base) {
+            try {
+                const res = await fetch(`${base}/seo-meta?api_key=${this._getKey()}&_=${Date.now()}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    // Keep a local copy as cache for offline/fallback use
+                    setLS('crm_seo_meta', data);
+                    return data;
+                }
+            } catch (e) {
+                console.warn('[seoMetaTagsApi] WP API unavailable, using localStorage fallback', e);
+            }
+        }
         return getLS('crm_seo_meta');
     },
+
     async create(data: any) {
+        const base = this._getBase();
+        if (base) {
+            try {
+                const res = await fetch(`${base}/seo-meta?api_key=${this._getKey()}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data),
+                });
+                if (res.ok) {
+                    const newItem = await res.json();
+                    // Sync local cache
+                    const items = getLS('crm_seo_meta');
+                    items.unshift(newItem);
+                    setLS('crm_seo_meta', items);
+                    return newItem;
+                }
+            } catch (e) {
+                console.warn('[seoMetaTagsApi] Create via WP API failed, saving to localStorage', e);
+            }
+        }
+        // localStorage fallback
         const items = getLS('crm_seo_meta');
         const newItem = { id: genId(), ...data, created_at: new Date().toISOString(), updated_at: new Date().toISOString() };
         items.unshift(newItem);
         setLS('crm_seo_meta', items);
         return newItem;
     },
+
     async update(id: string, data: any) {
+        const base = this._getBase();
+        if (base) {
+            try {
+                const res = await fetch(`${base}/seo-meta/${id}?api_key=${this._getKey()}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data),
+                });
+                if (res.ok) {
+                    // Update local cache
+                    const items = getLS('crm_seo_meta');
+                    const idx = items.findIndex((i: any) => String(i.id) === String(id));
+                    if (idx > -1) {
+                        items[idx] = { ...items[idx], ...data, updated_at: new Date().toISOString() };
+                        setLS('crm_seo_meta', items);
+                    }
+                    return { id, ...data };
+                }
+            } catch (e) {
+                console.warn('[seoMetaTagsApi] Update via WP API failed, saving to localStorage', e);
+            }
+        }
+        // localStorage fallback
         const items = getLS('crm_seo_meta');
         const idx = items.findIndex((i: any) => i.id === id);
         if (idx > -1) {
@@ -33,7 +107,25 @@ export const seoMetaTagsApi = {
         }
         return { id, ...data };
     },
+
     async delete(id: string) {
+        const base = this._getBase();
+        if (base) {
+            try {
+                const res = await fetch(`${base}/seo-meta/${id}?api_key=${this._getKey()}`, {
+                    method: 'DELETE',
+                });
+                if (res.ok) {
+                    let items = getLS('crm_seo_meta');
+                    items = items.filter((i: any) => String(i.id) !== String(id));
+                    setLS('crm_seo_meta', items);
+                    return { success: true };
+                }
+            } catch (e) {
+                console.warn('[seoMetaTagsApi] Delete via WP API failed, removing from localStorage', e);
+            }
+        }
+        // localStorage fallback
         let items = getLS('crm_seo_meta');
         items = items.filter((i: any) => i.id !== id);
         setLS('crm_seo_meta', items);
@@ -99,24 +191,38 @@ export const activityLogsApi = {
         return getLS('crm_activity_logs');
     },
     async create(data: any) {
-        // Log locally first (fallback)
+        // Log locally first (fallback so UI never blocks)
         const logs = getLS('crm_activity_logs');
         const newLog = { id: genId(), ...data, created_at: new Date().toISOString() };
         logs.unshift(newLog);
         setLS('crm_activity_logs', logs);
 
-        // Then attempt server-side logging
+        // Then attempt server-side logging via API key — works for ALL user roles,
+        // not just those with wp_credentials stored in localStorage.
         try {
-            const saved = localStorage.getItem('wp_credentials');
-            if (saved) {
-                const creds = JSON.parse(saved);
-                const authHeader = 'Basic ' + btoa(`${creds.username}:${creds.password}`);
+            const site = getCurrentSiteFromCache();
+            if (site?.url) {
+                const base = site.url.replace(/\/$/, '') + '/wp-json/crm/v1';
+                const apiKey = (import.meta as any).env?.VITE_WP_API_KEY || 'SECRET123';
 
-                const { wordpressApi } = await import('./wordpressApi');
-                await wordpressApi.logActivity(data.action, JSON.stringify(data.details || {}), { Authorization: authHeader });
+                const res = await fetch(`${base}/log?api_key=${apiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        action: data.action,
+                        details: JSON.stringify(data.details || {}),
+                        user_id: data.user_id || '',
+                        resource_type: data.resource_type || '',
+                        resource_id: data.resource_id || '',
+                    }),
+                });
+
+                if (!res.ok) {
+                    console.warn('[activityLogsApi] Server log failed:', await res.text());
+                }
             }
         } catch (e) {
-            console.warn('Failed to log activity to server:', e);
+            console.warn('[activityLogsApi] Failed to log activity to server:', e);
         }
 
         return newLog;
@@ -347,7 +453,7 @@ export const chatApi = {
 
 // Notifications API (WordPress-based)
 export const notificationsApi = {
-    async getAll(userId: string, siteId?: string, isSuperAdmin: boolean = false) {
+    async getAll(userId: string, siteId?: string, isSuperAdmin: boolean = false, userRole: string = '') {
         const site = getCurrentSiteFromCache();
         if (!site?.url) return [];
 
@@ -356,7 +462,7 @@ export const notificationsApi = {
         const apiBaseUrl = `${url}/crm/v1`;
         const apiKey = import.meta.env.VITE_WP_API_KEY;
 
-        const res = await fetch(`${apiBaseUrl}/notifications?userId=${userId}&isSuperAdmin=${isSuperAdmin}&api_key=${apiKey}`);
+        const res = await fetch(`${apiBaseUrl}/notifications?userId=${userId}&isSuperAdmin=${isSuperAdmin}&userRole=${userRole}&api_key=${apiKey}`);
         if (!res.ok) throw new Error('Failed to fetch notifications');
         return res.json();
     },
@@ -377,7 +483,7 @@ export const notificationsApi = {
         if (!res.ok) throw new Error('Failed to create notification');
         return res.json();
     },
-    async markAsRead(id: string) {
+    async markAsRead(id: string, userId: string) {
         const site = getCurrentSiteFromCache();
         if (!site?.url) throw new Error('No site selected');
 
@@ -387,12 +493,48 @@ export const notificationsApi = {
         const apiKey = import.meta.env.VITE_WP_API_KEY;
 
         const res = await fetch(`${apiBaseUrl}/notifications/${id}/read?api_key=${apiKey}`, {
-            method: 'PATCH'
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId })
         });
         if (!res.ok) throw new Error('Failed to mark notification as read');
         return res.json();
     },
-    async delete(id: string) {
+    async markAllAsRead(userId: string, isSuperAdmin: boolean = false) {
+        const site = getCurrentSiteFromCache();
+        if (!site?.url) throw new Error('No site selected');
+
+        let url = site.url.replace(/\/$/, '');
+        if (!url.includes('/wp-json')) url += '/wp-json';
+        const apiBaseUrl = `${url}/crm/v1`;
+        const apiKey = import.meta.env.VITE_WP_API_KEY;
+
+        const res = await fetch(`${apiBaseUrl}/notifications/read-all?api_key=${apiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId, isSuperAdmin })
+        });
+        if (!res.ok) throw new Error('Failed to mark all notifications as read');
+        return res.json();
+    },
+    async clearAll(userId: string, isSuperAdmin: boolean = false) {
+        const site = getCurrentSiteFromCache();
+        if (!site?.url) throw new Error('No site selected');
+
+        let url = site.url.replace(/\/$/, '');
+        if (!url.includes('/wp-json')) url += '/wp-json';
+        const apiBaseUrl = `${url}/crm/v1`;
+        const apiKey = import.meta.env.VITE_WP_API_KEY;
+
+        const res = await fetch(`${apiBaseUrl}/notifications/clear?api_key=${apiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId, isSuperAdmin })
+        });
+        if (!res.ok) throw new Error('Failed to clear notifications');
+        return res.json();
+    },
+    async delete(id: string, userId: string) {
         const site = getCurrentSiteFromCache();
         if (!site?.url) throw new Error('No site selected');
 
@@ -402,7 +544,9 @@ export const notificationsApi = {
         const apiKey = import.meta.env.VITE_WP_API_KEY;
 
         const res = await fetch(`${apiBaseUrl}/notifications/${id}?api_key=${apiKey}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId })
         });
         if (!res.ok) throw new Error('Failed to delete notification');
         return res.json();

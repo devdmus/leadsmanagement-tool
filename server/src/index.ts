@@ -4,6 +4,7 @@ import authRoutes from './routes/auth.js';
 import permissionsRoutes from './routes/permissions.js';
 import rolesRoutes from './routes/roles.js';
 import sitesRoutes from './routes/sites.js';
+import activityLogsRoutes from './routes/activityLogs.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -19,6 +20,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/permissions', permissionsRoutes);
 app.use('/api/roles', rolesRoutes);
 app.use('/api/sites', sitesRoutes);
+app.use('/api/activity-logs', activityLogsRoutes);
 
 // Health check
 app.get('/api/health', (_req, res) => {

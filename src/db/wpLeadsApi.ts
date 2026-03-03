@@ -180,6 +180,14 @@ export const wpLeadsApi = {
 
     console.log('🚀 Sending Update Request:', id, data);
 
+    // Helper to clear the local cache entry once the server confirms the save
+    const clearLocalCache = () => {
+      const updates = getLocalUpdates();
+      delete updates[id];
+      localStorage.setItem('crm_leads_local_updates', JSON.stringify(updates));
+      console.log('🗑️ Cleared local cache for ID:', id, '(server confirmed save)');
+    };
+
     // Try the direct endpoint first
     try {
       const res = await fetch(`${API_BASE}/lead/${id}?api_key=${API_KEY}`, {
@@ -190,7 +198,12 @@ export const wpLeadsApi = {
         body: JSON.stringify(data),
       });
 
-      if (res.ok) return res.json();
+      if (res.ok) {
+        // Server saved successfully — remove the local override so all users
+        // see the same server data on next fetch (fixes cross-user sync bug).
+        clearLocalCache();
+        return res.json();
+      }
 
       console.warn('⚠️ Direct update failed, trying fallback to /lead');
 
@@ -203,14 +216,18 @@ export const wpLeadsApi = {
         body: JSON.stringify({ ...data, id, action: 'update' }),
       });
 
-      if (fallbackRes.ok) return fallbackRes.json();
+      if (fallbackRes.ok) {
+        clearLocalCache();
+        return fallbackRes.json();
+      }
 
     } catch (e) {
       console.error('❌ Network error during update:', e);
     }
 
-    // If both fail, we still return "success" because we saved it locally
-    // This stops the "failed update" toast and makes the app usable.
+    // If both fail, we still return "success" because we saved it locally.
+    // The local override will be cleared automatically on the next fetch
+    // once the server's updated_at timestamp catches up.
     console.log('✅ Update preserved in local cache (Backend sync pending)');
     return { success: true, local: true };
   },

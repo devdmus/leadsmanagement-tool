@@ -83,9 +83,10 @@ export default function UsersPage() {
   const getUserBadge = (roles: string[]) => {
     if (roles.includes('administrator')) return <Badge>Admin</Badge>;
     if (roles.includes('editor')) return <Badge variant="default" className="bg-purple-600">SEO Manager</Badge>;
-    if (roles.includes('author')) return <Badge variant="secondary" className="bg-blue-600 text-white">Lead Manager</Badge>;
+    if (roles.includes('author')) return <Badge variant="secondary" className="bg-indigo-600 text-white">SEO Person</Badge>;
+    if (roles.includes('sales_manager')) return <Badge variant="secondary" className="bg-orange-600 text-white">Sales Manager</Badge>;
     if (roles.includes('contributor')) return <Badge variant="secondary">Sales Person</Badge>;
-    if (roles.includes('seo_person')) return <Badge variant="outline" className="border-purple-600 text-purple-600">SEO Person</Badge>;
+    if (roles.includes('seo_person')) return <Badge variant="outline" className="border-indigo-600 text-indigo-600">SEO Person</Badge>;
     return <Badge variant="outline">Client</Badge>;
   };
 
@@ -229,15 +230,15 @@ export default function UsersPage() {
                   </tr>
                   <tr className="border-b">
                     <td className="p-3 font-medium text-xs">Author</td>
-                    <td className="p-3"><Badge variant="secondary" className="bg-blue-600 text-white">Lead Manager</Badge></td>
+                    <td className="p-3"><Badge variant="secondary" className="bg-indigo-600 text-white">SEO Person</Badge></td>
+                  </tr>
+                  <tr className="border-b">
+                    <td className="p-3 font-medium text-xs">Sales Manager</td>
+                    <td className="p-3"><Badge variant="secondary" className="bg-orange-600 text-white">Sales Manager</Badge></td>
                   </tr>
                   <tr className="border-b">
                     <td className="p-3 font-medium text-xs">Contributor</td>
                     <td className="p-3"><Badge variant="secondary">Sales Person</Badge></td>
-                  </tr>
-                  <tr className="border-b">
-                    <td className="p-3 font-medium text-xs">Custom: 'seo_person'</td>
-                    <td className="p-3"><Badge variant="outline" className="border-purple-600 text-purple-600">SEO Person</Badge></td>
                   </tr>
                   <tr>
                     <td className="p-3 font-medium text-xs">Subscriber</td>

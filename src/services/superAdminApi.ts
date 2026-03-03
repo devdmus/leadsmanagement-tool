@@ -145,4 +145,41 @@ export const superAdminApi = {
     if (!res.ok) throw new Error('Failed to fetch roles');
     return res.json() as Promise<string[]>;
   },
+
+  // Super Admin Activity Logs
+  async logActivity(token: string, action: string, details: string) {
+    try {
+      await fetch(`${API_BASE}/activity-logs`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ action, details }),
+      });
+    } catch {
+      // Non-fatal — don't block the UI
+    }
+  },
+
+  async getActivityLogs(token: string, page = 1): Promise<{
+    logs: Array<{
+      id: number;
+      admin_id: number;
+      username: string;
+      action: string;
+      details: string;
+      ip_address: string;
+      created_at: string;
+    }>;
+    total: number;
+    page: number;
+    perPage: number;
+  }> {
+    const res = await fetch(`${API_BASE}/activity-logs?page=${page}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error('Failed to fetch super admin activity logs');
+    return res.json();
+  },
 };

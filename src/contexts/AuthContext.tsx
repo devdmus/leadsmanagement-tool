@@ -344,6 +344,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Refresh permissions after super admin login
       await loadPermissions();
 
+      // Log super admin login activity via Express backend
+      try {
+        let ip = 'unknown';
+        try {
+          const ipResponse = await fetch('https://api.ipify.org?format=json');
+          if (ipResponse.ok) {
+            const ipData = await ipResponse.json();
+            ip = ipData.ip;
+          }
+        } catch (_) { }
+        await superAdminApi.logActivity(
+          token,
+          'login',
+          `Super Admin ${saProfile.username} logged in from IP ${ip}`
+        );
+      } catch (logErr) {
+        console.warn('Could not log super admin login activity:', logErr);
+      }
+
       return { error: null };
     } catch (err: any) {
       console.error('Super Admin Login Error:', err);
@@ -411,8 +430,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       let appRole: UserRole = 'client';
       if (wpUser.roles.includes('administrator')) appRole = 'admin';
       else if (wpUser.roles.includes('editor')) appRole = 'seo_manager';
-      else if (wpUser.roles.includes('author')) appRole = 'lead_manager';
+      else if (wpUser.roles.includes('author')) appRole = 'seo_person';
+      else if (wpUser.roles.includes('sales_manager')) appRole = 'lead_manager';
       else if (wpUser.roles.includes('contributor')) appRole = 'sales_person';
+      else if (wpUser.roles.includes('subscriber')) appRole = 'client';
       else if (wpUser.roles.includes('seo_manager')) appRole = 'seo_manager';
       else if (wpUser.roles.includes('seo_person')) appRole = 'seo_person';
 
@@ -452,11 +473,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         const { createWordPressApi } = await import('../db/wordpressApi');
-        const loginApi = createWordPressApi(targetApiBase, { Authorization: authHeader });
+        // Use API key so ALL users (not just admins) can write activity logs
+        const apiKey = (import.meta as any).env?.VITE_WP_API_KEY || 'SECRET123';
+        const loginApi = createWordPressApi(targetApiBase, { 'x-crm-api-key': apiKey });
         await loginApi.logActivity(
           'login',
           `User ${newProfile.username} logged in from IP ${ip}`,
-          { Authorization: authHeader }
+          { 'x-crm-api-key': apiKey },
+          { user_id: newProfile.id, username: newProfile.username }
         );
 
         const logs = JSON.parse(localStorage.getItem('crm_ip_logs') || '[]');
@@ -491,15 +515,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    if (profile && wpCredentials && profile.role !== 'super_admin') {
+    // Log super admin logout via Express backend
+    if (profile?.role === 'super_admin' && superAdminToken) {
+      try {
+        await superAdminApi.logActivity(
+          superAdminToken,
+          'logout',
+          `Super Admin ${profile.username} logged out`
+        );
+      } catch (e) {
+        console.warn('Failed to log super admin logout:', e);
+      }
+    }
+
+    // Log WP user logout activity (uses API key so all roles are covered)
+    if (profile && profile.role !== 'super_admin') {
       try {
         const { createWordPressApi } = await import('../db/wordpressApi');
-        const authHeader = 'Basic ' + btoa(`${wpCredentials.username}:${wpCredentials.password}`);
+        const apiKey = (import.meta as any).env?.VITE_WP_API_KEY || 'SECRET123';
         const currentSite = getCurrentSiteInfo();
         if (currentSite) {
           const apiBase = toApiBase(currentSite.url);
-          const logoutApi = createWordPressApi(apiBase, { Authorization: authHeader });
-          await logoutApi.logActivity('logout', `User ${profile.username} logged out`, { Authorization: authHeader });
+          const logoutApi = createWordPressApi(apiBase, { 'x-crm-api-key': apiKey });
+          await logoutApi.logActivity(
+            'logout',
+            `User ${profile.username} logged out`,
+            { 'x-crm-api-key': apiKey },
+            { user_id: profile.id, username: profile.username }
+          );
         }
       } catch (e) {
         console.warn('Failed to log logout:', e);
@@ -543,13 +586,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logActivity = async (action: string, details: string) => {
     try {
-      const currentSite = getCurrentSiteInfo();
-      if (!currentSite) return; // No site available — skip logging
+      // Super Admin logs go to the Express/MySQL backend
+      if (isSuperAdmin && superAdminToken) {
+        await superAdminApi.logActivity(superAdminToken, action, details);
+        return;
+      }
+
+      // WP users log to their site's WordPress REST API using API key (works for ALL roles)
+      let siteInfo = getCurrentSiteInfo();
+      if (!siteInfo) return;
+
       const { createWordPressApi } = await import('../db/wordpressApi');
-      const authHeaderValue = getWpAuthHeader();
-      const apiBase = toApiBase(currentSite.url);
-      const api = createWordPressApi(apiBase, authHeaderValue ? { Authorization: authHeaderValue } : {});
-      await api.logActivity(action, details, authHeaderValue ? { Authorization: authHeaderValue } : undefined);
+      const apiKey = (import.meta as any).env?.VITE_WP_API_KEY || 'SECRET123';
+      const apiBase = toApiBase(siteInfo.url);
+      const api = createWordPressApi(apiBase, { 'x-crm-api-key': apiKey });
+      await api.logActivity(
+        action,
+        details,
+        { 'x-crm-api-key': apiKey },
+        profile ? { user_id: profile.id, username: profile.username } : undefined
+      );
     } catch (error) {
       console.error('Error logging activity:', error);
     }

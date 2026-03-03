@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { getRoleLabel } from '@/lib/utils';
 import { MessageSquare, X, Send, PlusCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -257,7 +258,7 @@ export function ChatWidget() {
                               </Avatar>
                               <div>
                                 <p className="text-sm font-medium">{user.username}</p>
-                                <Badge variant="secondary" className="text-xs">{user.role}</Badge>
+                                <Badge variant="secondary" className="text-xs">{getRoleLabel(user.role)}</Badge>
                               </div>
                             </label>
                           </div>
@@ -305,7 +306,7 @@ export function ChatWidget() {
                                 </Avatar>
                                 <div>
                                   <p className="text-sm font-medium">{user.username}</p>
-                                  <Badge variant="secondary" className="text-[10px]">{user.role}</Badge>
+                                  <Badge variant="secondary" className="text-[10px]">{getRoleLabel(user.role)}</Badge>
                                 </div>
                               </div>
                             ))
