@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { wpLeadsApi } from '@/db/wpLeadsApi';
 import { activityLogsApi } from '@/db/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { useSite } from '@/contexts/SiteContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -69,8 +68,7 @@ export default function LeadsPage() {
 
   /* ================= LOAD DATA ================= */
 
-  const { profile, hasPermission } = useAuth();
-  const { currentSite } = useSite();
+  const { profile, hasPermission } = useAuth(); // Destructure profile here
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -87,7 +85,7 @@ export default function LeadsPage() {
     if (profile) {
       loadData();
     }
-  }, [profile?.id, currentSite?.id]);
+  }, [profile?.id]);
 
   useEffect(() => {
     filterLeads();
@@ -109,9 +107,8 @@ export default function LeadsPage() {
         assignee: null,
       }));
 
-      // Team members only see leads assigned to them
-      const teamRoles = ['sales_person', 'seo_person', 'client'];
-      if (profile && teamRoles.includes(profile.role)) {
+      // If Sales Person, only show assigned leads. Admin and Sales Manager see all.
+      if (profile && profile.role === 'sales_person') {
         mapped = mapped.filter(l => l.assigned_to === profile.id);
       }
 

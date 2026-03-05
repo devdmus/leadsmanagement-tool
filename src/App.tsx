@@ -8,8 +8,6 @@ import { AuthProvider } from '@/contexts/AuthContext';
 import { SiteProvider } from '@/contexts/SiteContext';
 import { RouteGuard } from '@/components/common/RouteGuard';
 import { IPSecurityGuard } from '@/components/common/IPSecurityGuard';
-import { ContentProtectionProvider } from '@/components/common/ContentProtectionProvider';
-import { IdleTimeoutProvider } from '@/components/common/IdleTimeoutProvider';
 import { AppLayout } from '@/components/layouts/AppLayout';
 import { Toaster } from '@/components/ui/toaster';
 // import { ChatWidget } from '@/components/common/ChatWidget';
@@ -20,7 +18,7 @@ function AppContent() {
   const isLoginPage = location.pathname === '/login';
 
   return (
-    <IdleTimeoutProvider>
+    <>
       <IntersectObserver />
       {isLoginPage ? (
         <Routes>
@@ -35,26 +33,24 @@ function AppContent() {
         </Routes>
       ) : (
         <IPSecurityGuard>
-          <ContentProtectionProvider>
-            <AppLayout>
-              <Routes>
-                {routes.map((route, index) => (
-                  <Route
-                    key={index}
-                    path={route.path}
-                    element={route.element}
-                  />
-                ))}
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
-            </AppLayout>
-          </ContentProtectionProvider>
+          <AppLayout>
+            <Routes>
+              {routes.map((route, index) => (
+                <Route
+                  key={index}
+                  path={route.path}
+                  element={route.element}
+                />
+              ))}
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </AppLayout>
           {/* removed chat widget */}
           {/* <ChatWidget /> */}
         </IPSecurityGuard>
       )}
       <Toaster />
-    </IdleTimeoutProvider>
+    </>
   );
 }
 

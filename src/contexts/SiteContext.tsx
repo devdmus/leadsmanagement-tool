@@ -1,6 +1,4 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { setSiteCache } from '@/utils/siteCache';
-
 
 export type WordPressSite = {
     id: string;
@@ -9,157 +7,130 @@ export type WordPressSite = {
     username?: string;
     appPassword?: string;
     isDefault?: boolean;
-    assignedAdmins?: string[];
+    assignedAdmins?: string[]; // List of admin user IDs who can access this site
     createdAt: string;
 };
 
 type SiteContextType = {
     sites: WordPressSite[];
     currentSite: WordPressSite | null;
-    addSite: (site: Omit<WordPressSite, 'id' | 'createdAt'>) => Promise<WordPressSite>;
-    updateSite: (id: string, updates: Partial<WordPressSite>) => Promise<void>;
-    deleteSite: (id: string) => Promise<void>;
+    addSite: (site: Omit<WordPressSite, 'id' | 'createdAt'>) => WordPressSite;
+    updateSite: (id: string, updates: Partial<WordPressSite>) => void;
+    deleteSite: (id: string) => void;
     setCurrentSite: (siteId: string) => void;
     getApiBase: () => string;
     getAuthHeader: () => string | null;
     getAccessibleSites: (userId: string, userRole: string) => WordPressSite[];
-    canSwitchSites: (userId: string, userRole: string) => boolean;
-    assignAdminToSite: (siteId: string, adminId: string) => Promise<void>;
-    removeAdminFromSite: (siteId: string, adminId: string) => Promise<void>;
+    assignAdminToSite: (siteId: string, adminId: string) => void;
+    removeAdminFromSite: (siteId: string, adminId: string) => void;
 };
 
 const SiteContext = createContext<SiteContextType | undefined>(undefined);
 
+const SITES_KEY = 'crm_wp_sites';
 const CURRENT_SITE_KEY = 'crm_current_site_id';
-const API_BASE = 'http://localhost:3001/api/sites';
 
 const genId = () => Math.random().toString(36).substr(2, 9);
 
-/** Map snake_case DB row to camelCase WordPressSite */
-function mapRow(row: any): WordPressSite {
-    return {
-        id: row.id,
-        name: row.name,
-        url: row.url,
-        username: row.username ?? undefined,
-        appPassword: row.app_password ?? undefined,
-        isDefault: Boolean(row.is_default),
-        assignedAdmins: row.assignedAdmins ?? [],
-        createdAt: row.created_at ?? new Date().toISOString(),
-    };
-}
+// Default site configuration
+const DEFAULT_SITE: WordPressSite = {
+    id: 'default',
+    name: 'Bhairavi Healthcare',
+    url: 'https://digitmarketus.com/Bhairavi',
+    isDefault: true,
+    assignedAdmins: [],
+    createdAt: new Date().toISOString(),
+};
 
 export function SiteProvider({ children }: { children: ReactNode }) {
     const [sites, setSites] = useState<WordPressSite[]>([]);
     const [currentSite, setCurrentSiteState] = useState<WordPressSite | null>(null);
 
-    // ── Sync siteCache whenever sites or currentSite changes ────────────────
+    // Load sites from localStorage on mount
     useEffect(() => {
-        setSiteCache(sites, currentSite?.id ?? null);
-    }, [sites, currentSite]);
+        const savedSites = localStorage.getItem(SITES_KEY);
+        const savedCurrentId = localStorage.getItem(CURRENT_SITE_KEY);
 
-    // ── Load sites from DB on mount ──────────────────────────────────────────
-    useEffect(() => {
-        fetch(API_BASE)
-            .then(res => res.json())
-            .then((data: any[]) => {
-                const loadedSites = data.map(mapRow);
-                setSites(loadedSites);
+        let loadedSites: WordPressSite[] = [];
 
-                // Restore last active site from localStorage (just the ID)
-                const savedCurrentId = localStorage.getItem(CURRENT_SITE_KEY);
-                const activeSite = savedCurrentId
-                    ? (loadedSites.find(s => s.id === savedCurrentId) ?? loadedSites[0] ?? null)
-                    : (loadedSites[0] ?? null);
-                setCurrentSiteState(activeSite);
-            })
-            .catch(err => {
-                console.warn('Failed to load sites from DB, falling back to localStorage', err);
-                // Fallback: try localStorage if server is not reachable
-                const saved = localStorage.getItem('crm_wp_sites');
-                if (saved) {
-                    const loadedSites: WordPressSite[] = JSON.parse(saved);
-                    setSites(loadedSites);
-                    const savedCurrentId = localStorage.getItem(CURRENT_SITE_KEY);
-                    const activeSite = savedCurrentId
-                        ? (loadedSites.find(s => s.id === savedCurrentId) ?? loadedSites[0] ?? null)
-                        : (loadedSites[0] ?? null);
-                    setCurrentSiteState(activeSite);
-                }
-            });
+        if (savedSites) {
+            loadedSites = JSON.parse(savedSites);
+        }
+
+        // Ensure default site exists
+        if (!loadedSites.find(s => s.id === 'default')) {
+            loadedSites = [DEFAULT_SITE, ...loadedSites];
+        }
+
+        setSites(loadedSites);
+
+        // Set current site
+        if (savedCurrentId) {
+            const found = loadedSites.find(s => s.id === savedCurrentId);
+            setCurrentSiteState(found || loadedSites[0]);
+        } else {
+            setCurrentSiteState(loadedSites[0]);
+        }
     }, []);
 
-    // ── CRUD operations ──────────────────────────────────────────────────────
+    // Save sites to localStorage whenever they change
+    useEffect(() => {
+        if (sites.length > 0) {
+            localStorage.setItem(SITES_KEY, JSON.stringify(sites));
+        }
+    }, [sites]);
 
-    const addSite = async (siteData: Omit<WordPressSite, 'id' | 'createdAt'>): Promise<WordPressSite> => {
+    const addSite = (siteData: Omit<WordPressSite, 'id' | 'createdAt'>): WordPressSite => {
         const newSite: WordPressSite = {
             ...siteData,
             id: genId(),
             assignedAdmins: siteData.assignedAdmins || [],
             createdAt: new Date().toISOString(),
         };
-
-        const res = await fetch(API_BASE, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newSite),
-        });
-
-        if (!res.ok) throw new Error('Failed to create site');
-        const created = mapRow(await res.json());
-        setSites(prev => [...prev, created]);
-        return created;
+        setSites(prev => [...prev, newSite]);
+        return newSite;
     };
 
-    const updateSite = async (id: string, updates: Partial<WordPressSite>): Promise<void> => {
-        const res = await fetch(`${API_BASE}/${id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(updates),
-        });
+    const updateSite = (id: string, updates: Partial<WordPressSite>) => {
+        setSites(prev => prev.map(site =>
+            site.id === id ? { ...site, ...updates } : site
+        ));
 
-        if (!res.ok) throw new Error('Failed to update site');
-        const updated = mapRow(await res.json());
-
-        setSites(prev => prev.map(site => site.id === id ? updated : site));
+        // Update current site if it was updated
         if (currentSite?.id === id) {
-            setCurrentSiteState(updated);
+            setCurrentSiteState(prev => prev ? { ...prev, ...updates } : prev);
         }
     };
 
-    const deleteSite = async (id: string): Promise<void> => {
-        const res = await fetch(`${API_BASE}/${id}`, { method: 'DELETE' });
-        if (!res.ok) throw new Error('Failed to delete site');
+    const deleteSite = (id: string) => {
+        // Can't delete default site
+        if (id === 'default') return;
 
         setSites(prev => prev.filter(site => site.id !== id));
 
+        // If deleted site was current, switch to default
         if (currentSite?.id === id) {
-            const remaining = sites.filter(s => s.id !== id);
-            const nextSite = remaining[0] || null;
-            setCurrentSiteState(nextSite);
-            if (nextSite) {
-                localStorage.setItem(CURRENT_SITE_KEY, nextSite.id);
-            } else {
-                localStorage.removeItem(CURRENT_SITE_KEY);
-            }
+            const defaultSite = sites.find(s => s.id === 'default') || sites[0];
+            setCurrentSiteState(defaultSite);
+            localStorage.setItem(CURRENT_SITE_KEY, defaultSite.id);
         }
     };
 
     const setCurrentSite = (siteId: string) => {
         const site = sites.find(s => s.id === siteId);
         if (site) {
-            // Sync siteCache immediately so child useEffects see the new site
-            // when they fire (before the parent useEffect would run)
-            setSiteCache(sites, siteId);
             setCurrentSiteState(site);
             localStorage.setItem(CURRENT_SITE_KEY, siteId);
         }
     };
 
     const getApiBase = (): string => {
-        if (!currentSite) return '';
+        if (!currentSite) return 'https://digitmarketus.com/Bhairavi/wp-json';
+
         let url = currentSite.url;
+        // Remove trailing slash
         url = url.replace(/\/$/, '');
+        // Add wp-json if not present
         if (!url.includes('/wp-json')) {
             url = `${url}/wp-json`;
         }
@@ -167,10 +138,12 @@ export function SiteProvider({ children }: { children: ReactNode }) {
     };
 
     const getAuthHeader = (): string | null => {
+        // First check current site credentials
         if (currentSite?.username && currentSite?.appPassword) {
             return 'Basic ' + btoa(`${currentSite.username}:${currentSite.appPassword}`);
         }
 
+        // Fallback to global credentials
         const savedCreds = localStorage.getItem('wp_credentials');
         if (savedCreds) {
             const creds = JSON.parse(savedCreds);
@@ -180,39 +153,42 @@ export function SiteProvider({ children }: { children: ReactNode }) {
         return null;
     };
 
+    // Get sites accessible to a user based on their role
     const getAccessibleSites = (userId: string, userRole: string): WordPressSite[] => {
-        if (userRole === 'super_admin') return sites;
-
-        // Filter sites where this user is assigned
-        const assigned = sites.filter(s => (s.assignedAdmins || []).includes(userId));
-
-        // Also always include the current site if it's not already in the list
-        if (currentSite && !assigned.some(s => s.id === currentSite.id)) {
-            return [currentSite, ...assigned];
+        // Admin sees all sites
+        if (userRole === 'admin') {
+            return sites;
         }
 
-        return assigned;
+        // Other users see only the current site (their assigned site)
+        // In a more complex setup, you'd have user-to-site assignments
+        return currentSite ? [currentSite] : [];
     };
 
-    const canSwitchSites = (userId: string, userRole: string): boolean => {
-        if (userRole === 'super_admin') return true;
-        return getAccessibleSites(userId, userRole).length > 1;
+    // Assign an admin to a site
+    const assignAdminToSite = (siteId: string, adminId: string) => {
+        setSites(prev => prev.map(site => {
+            if (site.id === siteId) {
+                const currentAdmins = site.assignedAdmins || [];
+                if (!currentAdmins.includes(adminId)) {
+                    return { ...site, assignedAdmins: [...currentAdmins, adminId] };
+                }
+            }
+            return site;
+        }));
     };
 
-    const assignAdminToSite = async (siteId: string, adminId: string): Promise<void> => {
-        const site = sites.find(s => s.id === siteId);
-        if (!site) return;
-        const currentAdmins = site.assignedAdmins || [];
-        if (currentAdmins.includes(adminId)) return;
-        await updateSite(siteId, { assignedAdmins: [...currentAdmins, adminId] });
-    };
-
-    const removeAdminFromSite = async (siteId: string, adminId: string): Promise<void> => {
-        const site = sites.find(s => s.id === siteId);
-        if (!site) return;
-        await updateSite(siteId, {
-            assignedAdmins: (site.assignedAdmins || []).filter(id => id !== adminId),
-        });
+    // Remove an admin from a site
+    const removeAdminFromSite = (siteId: string, adminId: string) => {
+        setSites(prev => prev.map(site => {
+            if (site.id === siteId) {
+                return {
+                    ...site,
+                    assignedAdmins: (site.assignedAdmins || []).filter(id => id !== adminId)
+                };
+            }
+            return site;
+        }));
     };
 
     return (
@@ -226,7 +202,6 @@ export function SiteProvider({ children }: { children: ReactNode }) {
             getApiBase,
             getAuthHeader,
             getAccessibleSites,
-            canSwitchSites,
             assignAdminToSite,
             removeAdminFromSite,
         }}>

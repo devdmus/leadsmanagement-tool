@@ -61,21 +61,8 @@ import {
   Calendar,
   Facebook,
   Linkedin,
-  Trash2,
 } from 'lucide-react';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
-import { UserSearchSelect } from '@/components/common/UserSearchSelect';
 
 type UserRole = 'admin' | 'sales' | 'seo' | 'client';
 type LeadSource = 'facebook' | 'linkedin' | 'form' | 'seo' | 'website' | 'website_contact' | string;
@@ -162,10 +149,6 @@ export default function LeadsPageEnhanced() {
   const { profile, hasPermission } = useAuth();
   const { currentSite } = useSite();
   const { toast } = useToast();
-  const isAdmin = profile?.role === 'super_admin' || profile?.role === 'admin';
-  // Roles explicitly allowed to delete leads (regardless of DB permission overrides)
-  const canDeleteLead = hasPermission('leads', 'write') ||
-    ['super_admin', 'admin', 'lead_manager', 'sales_person'].includes(profile?.role || '');
 
 
   // Load saved credentials from localStorage on mount
@@ -254,12 +237,6 @@ export default function LeadsPageEnhanced() {
         ...l,
         assignee: allUsers.find(u => u.id === l.assigned_to) || null,
       }));
-
-      // Team member filter: only show leads assigned to current user
-      const teamRoles = ['sales_person', 'seo_person', 'client'];
-      if (profile && teamRoles.includes(profile.role)) {
-        filteredData = filteredData.filter(lead => lead.assigned_to === profile.id);
-      }
 
       // Apply search filter
       if (searchQuery) {
@@ -405,45 +382,6 @@ export default function LeadsPageEnhanced() {
       toast({
         title: 'Error',
         description: 'Failed to update leads',
-        variant: 'destructive',
-      });
-    }
-  };
-
-  const handleDeleteLead = async (leadId: string) => {
-    if (!hasPermission('leads', 'write')) {
-      toast({
-        title: 'Permission Denied',
-        description: 'You do not have permission to delete leads',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    try {
-      await wpLeadsApi.delete(leadId);
-
-      if (profile) {
-        await activityLogsApi.create({
-          user_id: profile.id as string,
-          action: 'delete_lead',
-          resource_type: 'lead',
-          resource_id: leadId,
-          details: { lead_id: leadId },
-        });
-      }
-
-      toast({
-        title: 'Success',
-        description: 'Lead deleted successfully',
-      });
-
-      loadLeads();
-    } catch (error) {
-      console.error('Failed to delete lead:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to delete lead',
         variant: 'destructive',
       });
     }
@@ -715,30 +653,28 @@ export default function LeadsPageEnhanced() {
           <p className="text-muted-foreground">Manage and track your marketing leads</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {/* Add Lead, Import, Export — super_admin and admin only */}
-          {isAdmin && (
+          {hasPermission('leads', 'write') && (
             <>
               <Button onClick={() => setShowCreateDialog(true)}>
                 <Plus className="h-4 w-4 mr-2" />
                 Add Lead
               </Button>
+              {selectedLeads.length > 0 && (
+                <Button variant="outline" onClick={() => setShowBulkEditDialog(true)}>
+                  <Edit className="h-4 w-4 mr-2" />
+                  Bulk Edit ({selectedLeads.length})
+                </Button>
+              )}
               <Button variant="outline" onClick={() => setShowImportDialog(true)}>
                 <Upload className="h-4 w-4 mr-2" />
                 Import
               </Button>
-              <Button variant="outline" onClick={handleExport}>
-                <Download className="h-4 w-4 mr-2" />
-                Export
-              </Button>
             </>
           )}
-          {/* Bulk Edit — any user with leads write permission */}
-          {hasPermission('leads', 'write') && selectedLeads.length > 0 && (
-            <Button variant="outline" onClick={() => setShowBulkEditDialog(true)}>
-              <Edit className="h-4 w-4 mr-2" />
-              Bulk Edit ({selectedLeads.length})
-            </Button>
-          )}
+          <Button variant="outline" onClick={handleExport}>
+            <Download className="h-4 w-4 mr-2" />
+            Export
+          </Button>
         </div>
       </div>
 
@@ -888,36 +824,6 @@ export default function LeadsPageEnhanced() {
                                     Schedule Follow-up
                                   </DropdownMenuItem>
                                 )}
-                                {canDeleteLead && (
-                                  <AlertDialog>
-                                    <AlertDialogTrigger asChild>
-                                      <DropdownMenuItem
-                                        className="text-destructive focus:text-destructive"
-                                        onSelect={(e) => e.preventDefault()}
-                                      >
-                                        <Trash2 className="h-4 w-4 mr-2" />
-                                        Delete Lead
-                                      </DropdownMenuItem>
-                                    </AlertDialogTrigger>
-                                    <AlertDialogContent>
-                                      <AlertDialogHeader>
-                                        <AlertDialogTitle>Delete Lead?</AlertDialogTitle>
-                                        <AlertDialogDescription>
-                                          This will permanently delete "{lead.name}". This action cannot be undone.
-                                        </AlertDialogDescription>
-                                      </AlertDialogHeader>
-                                      <AlertDialogFooter>
-                                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                        <AlertDialogAction
-                                          onClick={() => handleDeleteLead(lead.id)}
-                                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                                        >
-                                          Delete
-                                        </AlertDialogAction>
-                                      </AlertDialogFooter>
-                                    </AlertDialogContent>
-                                  </AlertDialog>
-                                )}
                               </DropdownMenuContent>
                             </DropdownMenu>
                           </TableCell>
@@ -1015,11 +921,22 @@ export default function LeadsPageEnhanced() {
             </div>
             <div>
               <Label htmlFor="assigned_to">Assign To</Label>
-              <UserSearchSelect
-                users={users}
+              <Select
                 value={newLead.assigned_to}
                 onValueChange={(value) => setNewLead({ ...newLead, assigned_to: value })}
-              />
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unassigned">Unassigned</SelectItem>
+                  {users.map((user) => (
+                    <SelectItem key={user.id} value={user.id}>
+                      {user.username} ({user.role})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <DialogFooter>
@@ -1059,11 +976,22 @@ export default function LeadsPageEnhanced() {
             </div>
             <div>
               <Label htmlFor="bulk_assigned_to">Assign To</Label>
-              <UserSearchSelect
-                users={users}
+              <Select
                 value={bulkEditData.assigned_to}
                 onValueChange={(value) => setBulkEditData({ ...bulkEditData, assigned_to: value })}
-              />
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select user" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unassigned">Unassigned</SelectItem>
+                  {users.map((user) => (
+                    <SelectItem key={user.id} value={user.id}>
+                      {user.username} ({user.role})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <DialogFooter>
