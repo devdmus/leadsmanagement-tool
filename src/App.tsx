@@ -12,6 +12,7 @@ import { ContentProtectionProvider } from '@/components/common/ContentProtection
 import { IdleTimeoutProvider } from '@/components/common/IdleTimeoutProvider';
 import { AppLayout } from '@/components/layouts/AppLayout';
 import { Toaster } from '@/components/ui/toaster';
+import { MinWidthGuard } from '@/components/common/MinWidthGuard';
 // import { ChatWidget } from '@/components/common/ChatWidget';
 import 'react-quill/dist/quill.snow.css';
 
@@ -60,15 +61,17 @@ function AppContent() {
 
 const App: React.FC = () => {
   return (
-    <Router>
-      <SiteProvider>
-        <AuthProvider>
-          <RouteGuard>
-            <AppContent />
-          </RouteGuard>
-        </AuthProvider>
-      </SiteProvider>
-    </Router>
+    <MinWidthGuard>
+      <Router>
+        <SiteProvider>
+          <AuthProvider>
+            <RouteGuard>
+              <AppContent />
+            </RouteGuard>
+          </AuthProvider>
+        </SiteProvider>
+      </Router>
+    </MinWidthGuard>
   );
 };
 

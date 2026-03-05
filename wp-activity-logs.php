@@ -436,23 +436,42 @@ function crm_get_activity_logs($request)
         return new WP_Error('db_error', 'Table ' . $table_logs . ' does not exist.', array('status' => 500));
     }
 
-    $per_page = 50;
+    // Get page and limit from request parameters
     $page = $request->get_param('page') ? intval($request->get_param('page')) : 1;
-    $offset = ($page - 1) * $per_page;
+    $limit = $request->get_param('limit') ? intval($request->get_param('limit')) : 20;
+
+    // Validate limit (max 100 for security, minimum 1)
+    $limit = min(abs($limit), 100);
+    $limit = max($limit, 1);
+
+    $offset = ($page - 1) * $limit;
+
+    error_log('🔍 WP crm_get_activity_logs - page: ' . $page . ', limit: ' . $limit . ', offset: ' . $offset);
+
+    // Total count for pagination
+    $total = (int) $wpdb->get_var("SELECT COUNT(*) FROM $table_logs");
 
     $results = $wpdb->get_results(
         $wpdb->prepare(
-        "SELECT * FROM $table_logs ORDER BY timestamp DESC LIMIT %d OFFSET %d",
-        $per_page,
-        $offset
-    )
+            "SELECT * FROM $table_logs ORDER BY timestamp DESC LIMIT %d OFFSET %d",
+            $limit,
+            $offset
+        )
     );
 
     if ($wpdb->last_error) {
+        error_log('❌ WP Query error: ' . $wpdb->last_error);
         return new WP_Error('db_error', 'Query error: ' . $wpdb->last_error, array('status' => 500));
     }
 
-    return new WP_REST_Response($results, 200);
+    error_log('✅ WP crm_get_activity_logs returned ' . count($results) . ' of ' . $total . ' total');
+
+    return new WP_REST_Response(array(
+        'logs'    => $results,
+        'total'   => $total,
+        'page'    => $page,
+        'perPage' => $limit,
+    ), 200);
 }
 
 // Admin UI Stuff

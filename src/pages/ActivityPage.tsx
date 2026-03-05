@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSite } from '@/contexts/SiteContext';
 import { superAdminApi } from '@/services/superAdminApi';
@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2, RefreshCw, Clock, User, Globe, Info, KeyRound, Settings, ShieldCheck } from 'lucide-react';
+import { Clock, User, Globe, Info, KeyRound, Settings, ShieldCheck } from 'lucide-react';
 import { createWordPressApi } from '@/db/wordpressApi';
 import {
   Table,
@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
 import { Skeleton } from '@/components/ui/skeleton';
+import { DataPagination } from '@/components/common/DataPagination';
 import { format } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
 
@@ -48,34 +49,47 @@ export default function ActivityPage() {
   const navigate = useNavigate();
 
   // WP site logs
-  const [siteLogs, setSiteLogs] = useState<ServerLog[]>([]);
+  const [allSiteLogs, setAllSiteLogs] = useState<ServerLog[]>([]); // full dataset
   const [siteLoading, setSiteLoading] = useState(true);
   const [noCredentials, setNoCredentials] = useState(false);
   const [sitePage, setSitePage] = useState(1);
+  const [sitePageSize, setSitePageSize] = useState(10);
+
+  // Derived: slice allSiteLogs to current page
+  const siteLogs = allSiteLogs.slice((sitePage - 1) * sitePageSize, sitePage * sitePageSize);
+  const siteTotalItems = allSiteLogs.length;
 
   // Super admin logs
   const [saLogs, setSaLogs] = useState<SuperAdminLog[]>([]);
   const [saLoading, setSaLoading] = useState(false);
   const [saPage, setSaPage] = useState(1);
-  const [saTotal, setSaTotal] = useState(0);
+  const [saPageSize, setSaPageSize] = useState(10);
+  const [saTotalItems, setSaTotalItems] = useState(0);
 
+  // Check permissions early
+  if (!hasPermission('activity_logs', 'read')) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <p className="text-muted-foreground">
+          You do not have permission to access this page
+        </p>
+      </div>
+    );
+  }
+
+  // Reset site page when site changes
   useEffect(() => {
-    loadSiteLogs();
-  }, [sitePage, currentSite?.id]);
+    setSitePage(1);
+  }, [currentSite?.id]);
 
-  useEffect(() => {
-    if (isSuperAdmin && superAdminToken) {
-      loadSaLogs();
-    }
-  }, [saPage, isSuperAdmin, superAdminToken]);
-
-  const loadSiteLogs = async () => {
+  const loadSiteLogs = useCallback(async () => {
     setSiteLoading(true);
     setNoCredentials(false);
+    console.log('📋 ActivityPage - loadSiteLogs called (fetching all):', { currentSite: currentSite?.name });
 
     if (currentSite && !currentSite.isDefault && !currentSite.username && !isSuperAdmin) {
       setNoCredentials(true);
-      setSiteLogs([]);
+      setAllSiteLogs([]);
       setSiteLoading(false);
       return;
     }
@@ -85,17 +99,23 @@ export default function ActivityPage() {
       const userAuthHeader = getWpAuthHeader(currentSite?.id);
       const authValue = siteAuthHeader || (userAuthHeader ? userAuthHeader : null);
 
-      const api = createWordPressApi(
-        getApiBase(),
-        authValue ? { Authorization: authValue } : {}
-      );
+      const apiBase = getApiBase();
+      const api = createWordPressApi(apiBase, authValue ? { Authorization: authValue } : {});
 
-      const data = await api.getActivityLogs(sitePage, authValue ? { Authorization: authValue } : undefined);
-      setSiteLogs(data);
+      // Fetch all records at once (limit=500) — pagination is done client-side
+      const data = await api.getActivityLogs(1, 500, authValue ? { Authorization: authValue } : undefined);
+
+      const logsArray: ServerLog[] = Array.isArray(data.logs)
+        ? data.logs
+        : (Array.isArray(data) ? (data as any[]) : []);
+
+      console.log('📋 ActivityPage - fetched', logsArray.length, 'site log records');
+      setAllSiteLogs(logsArray);
+      setSitePage(1); // reset to first page whenever data reloads
     } catch (err: any) {
       if (err.message?.includes('401') || err.message?.includes('403') || err.message?.includes('permission')) {
         setNoCredentials(true);
-        setSiteLogs([]);
+        setAllSiteLogs([]);
       } else {
         toast({
           title: 'Fetch Error',
@@ -106,15 +126,15 @@ export default function ActivityPage() {
     } finally {
       setSiteLoading(false);
     }
-  };
+  }, [currentSite, isSuperAdmin, getAuthHeader, getWpAuthHeader, getApiBase, toast]);
 
-  const loadSaLogs = async () => {
+  const loadSaLogs = useCallback(async () => {
     if (!superAdminToken) return;
     setSaLoading(true);
     try {
-      const result = await superAdminApi.getActivityLogs(superAdminToken, saPage);
+      const result = await superAdminApi.getActivityLogs(superAdminToken, saPage, saPageSize);
       setSaLogs(result.logs);
-      setSaTotal(result.total);
+      setSaTotalItems(result.total);
     } catch (err: any) {
       toast({
         title: 'Error',
@@ -124,7 +144,20 @@ export default function ActivityPage() {
     } finally {
       setSaLoading(false);
     }
-  };
+  }, [superAdminToken, saPage, saPageSize, toast]);
+
+  // Reload all logs only when site changes (pagination is client-side)
+  useEffect(() => {
+    if (currentSite?.id) {
+      loadSiteLogs();
+    }
+  }, [currentSite?.id, loadSiteLogs]);
+
+  useEffect(() => {
+    if (isSuperAdmin && superAdminToken) {
+      loadSaLogs();
+    }
+  }, [saPage, saPageSize, isSuperAdmin, superAdminToken, loadSaLogs]);
 
   const getActionBadge = (action: string) => {
     switch (action.toLowerCase()) {
@@ -158,54 +191,51 @@ export default function ActivityPage() {
   }) => (
     loading ? (
       <div className="space-y-2">
-        {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
+        {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}
       </div>
     ) : (
       <div className="rounded-md border">
         <Table>
           <TableHeader>
-            <TableRow>
-              <TableHead className="w-[180px]">Timestamp</TableHead>
-              <TableHead>User</TableHead>
-              <TableHead>Action</TableHead>
-              <TableHead>Details</TableHead>
-              <TableHead>IP Address</TableHead>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="w-[180px] h-12">Timestamp</TableHead>
+              <TableHead className="h-12">User</TableHead>
+              <TableHead className="h-12">Action</TableHead>
+              <TableHead className="h-12">IP Address</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {logs.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={4} className="text-center py-12 text-muted-foreground">
                   {emptyLabel}
                 </TableCell>
               </TableRow>
             ) : (
               logs.map((log) => (
-                <TableRow key={log.id}>
-                  <TableCell className="text-muted-foreground text-xs">
+                <TableRow
+                  key={log.id}
+                  className="cursor-pointer hover:bg-muted/50 transition-colors h-14"
+                  onClick={() => navigate(`/activity/${log.id}`, { state: { log } })}
+                >
+                  <TableCell className="text-muted-foreground text-xs py-3">
                     <div className="flex items-center gap-1">
-                      <Clock className="h-3 w-3" />
+                      <Clock className="h-4 w-4 shrink-0" />
                       {log[timestampKey] && !isNaN(new Date(log[timestampKey]).getTime())
                         ? format(new Date(log[timestampKey]), 'MMM d, yyyy HH:mm:ss')
                         : 'Invalid Date'}
                     </div>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="py-3">
                     <div className="flex items-center gap-2">
-                      <User className="h-3 w-3 text-muted-foreground" />
+                      <User className="h-4 w-4 text-muted-foreground shrink-0" />
                       <span className="font-medium">{log.username}</span>
                     </div>
                   </TableCell>
-                  <TableCell>{getActionBadge(log.action)}</TableCell>
-                  <TableCell className="max-w-[300px]">
-                    <div className="flex items-start gap-2">
-                      <Info className="h-3 w-3 mt-1 text-muted-foreground shrink-0" />
-                      <span className="text-sm">{log.details}</span>
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground font-mono text-xs">
+                  <TableCell className="py-3">{getActionBadge(log.action)}</TableCell>
+                  <TableCell className="text-muted-foreground font-mono text-xs py-3">
                     <div className="flex items-center gap-1">
-                      <Globe className="h-3 w-3" />
+                      <Globe className="h-4 w-4 shrink-0" />
                       {log.ip_address}
                     </div>
                   </TableCell>
@@ -218,18 +248,8 @@ export default function ActivityPage() {
     )
   );
 
-  if (!hasPermission('activity_logs', 'read')) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <p className="text-muted-foreground">
-          You do not have permission to access this page
-        </p>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-6 p-6 animate-fade-in">
+    <div className="space-y-6 p-0 animate-fade-in">
       <div>
         <h1 className="text-3xl font-bold">Activity Logs</h1>
         <p className="text-muted-foreground">Audit trail for all system actions</p>
@@ -254,40 +274,30 @@ export default function ActivityPage() {
           <TabsContent value="super_admin">
             <Card>
               <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>Super Admin Activity</CardTitle>
-                    <CardDescription>
-                      Login, logout, and all actions performed by the Super Admin account — stored in the CRM database.
-                    </CardDescription>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button variant="outline" size="sm"
-                      onClick={() => setSaPage(p => Math.max(1, p - 1))}
-                      disabled={saLoading || saPage === 1}>
-                      Previous
-                    </Button>
-                    <span className="text-sm text-muted-foreground px-1">Page {saPage}</span>
-                    <Button variant="outline" size="sm"
-                      onClick={() => setSaPage(p => p + 1)}
-                      disabled={saLoading || saLogs.length < 50}>
-                      Next
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={loadSaLogs} disabled={saLoading}>
-                      {saLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                    </Button>
-                  </div>
+                <div>
+                  <CardTitle>Super Admin Activity</CardTitle>
+                  <CardDescription>
+                    Login, logout, and all actions performed by the Super Admin account — stored in the CRM database.
+                  </CardDescription>
                 </div>
-                {saTotal > 0 && (
-                  <p className="text-xs text-muted-foreground pt-1">{saTotal} total entries</p>
-                )}
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-4">
                 <LogTable
                   logs={saLogs}
                   loading={saLoading}
                   timestampKey="created_at"
                   emptyLabel="No super admin activity logged yet"
+                />
+                <DataPagination
+                  currentPage={saPage}
+                  totalPages={Math.ceil(saTotalItems / saPageSize)}
+                  pageSize={saPageSize}
+                  totalItems={saTotalItems}
+                  onPageChange={setSaPage}
+                  onPageSizeChange={(size) => {
+                    setSaPageSize(size);
+                    setSaPage(1);
+                  }}
                 />
               </CardContent>
             </Card>
@@ -298,32 +308,14 @@ export default function ActivityPage() {
         <TabsContent value="site">
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Site Activity</CardTitle>
-                  <CardDescription>
-                    Audit trail for <strong>{currentSite?.name || 'selected site'}</strong> — {currentSite?.url}
-                  </CardDescription>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm"
-                    onClick={() => setSitePage(p => Math.max(1, p - 1))}
-                    disabled={siteLoading || sitePage === 1}>
-                    Previous
-                  </Button>
-                  <span className="text-sm text-muted-foreground px-1">Page {sitePage}</span>
-                  <Button variant="outline" size="sm"
-                    onClick={() => setSitePage(p => p + 1)}
-                    disabled={siteLoading || siteLogs.length < 50}>
-                    Next
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={loadSiteLogs} disabled={siteLoading}>
-                    {siteLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                  </Button>
-                </div>
+              <div>
+                <CardTitle>Site Activity</CardTitle>
+                <CardDescription>
+                  Audit trail for <strong>{currentSite?.name || 'selected site'}</strong> — {currentSite?.url}
+                </CardDescription>
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
               {noCredentials ? (
                 <div className="flex flex-col items-center justify-center py-12 text-center gap-3">
                   <KeyRound className="h-10 w-10 text-amber-400 opacity-80" />
@@ -337,12 +329,25 @@ export default function ActivityPage() {
                   </Button>
                 </div>
               ) : (
-                <LogTable
-                  logs={siteLogs}
-                  loading={siteLoading}
-                  timestampKey="timestamp"
-                  emptyLabel="No logs found on this site"
-                />
+                <>
+                  <LogTable
+                    logs={siteLogs}
+                    loading={siteLoading}
+                    timestampKey="timestamp"
+                    emptyLabel="No logs found on this site"
+                  />
+                  <DataPagination
+                    currentPage={sitePage}
+                    totalPages={Math.ceil(siteTotalItems / sitePageSize)}
+                    pageSize={sitePageSize}
+                    totalItems={siteTotalItems}
+                    onPageChange={setSitePage}
+                    onPageSizeChange={(size) => {
+                      setSitePageSize(size);
+                      setSitePage(1);
+                    }}
+                  />
+                </>
               )}
             </CardContent>
           </Card>

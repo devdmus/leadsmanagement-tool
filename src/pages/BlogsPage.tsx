@@ -757,48 +757,50 @@ export default function BlogsPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold">Blog Management</h1>
-          <p className="text-muted-foreground">
-            Create and manage blog posts from WordPress
-          </p>
+      <div className="flex justify-between items-end">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold">Blog Management</h1>
+            <p className="text-muted-foreground">
+              Create and manage blog posts from WordPress
+            </p>
+          </div>
         </div>
-      </div>
-      <div className="flex gap-2">
-        {selectedBlogs.length > 0 && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline">
-                Bulk Actions ({selectedBlogs.length})
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent>
-              <DropdownMenuItem onClick={() => setIsBulkAssignDialogOpen(true)}>
-                <UserPlus className="mr-2 h-4 w-4" />
-                Assign to User
-              </DropdownMenuItem>
-              {canDeleteBlog && (
-                <DropdownMenuItem onClick={handleBulkDelete} className="text-destructive">
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Delete Selected
+        <div className="flex gap-2">
+          {selectedBlogs.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline">
+                  Bulk Actions ({selectedBlogs.length})
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem onClick={() => setIsBulkAssignDialogOpen(true)}>
+                  <UserPlus className="mr-2 h-4 w-4" />
+                  Assign to User
                 </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-        <Button variant="outline" onClick={() => setShowCategoryDialog(true)}>
-          <FolderPlus className="h-4 w-4 mr-2" />
-          Add Category
-        </Button>
-        <Button variant="outline" onClick={() => setShowTagDialog(true)}>
-          <TagIcon className="h-4 w-4 mr-2" />
-          Add Tag
-        </Button>
-        <Button onClick={openNewDialog}>
-          <Plus className="h-4 w-4 mr-2" />
-          New Blog Post
-        </Button>
+                {canDeleteBlog && (
+                  <DropdownMenuItem onClick={handleBulkDelete} className="text-destructive">
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Delete Selected
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          <Button variant="outline" onClick={() => setShowCategoryDialog(true)}>
+            <FolderPlus className="h-4 w-4 mr-2" />
+            Add Category
+          </Button>
+          <Button variant="outline" onClick={() => setShowTagDialog(true)}>
+            <TagIcon className="h-4 w-4 mr-2" />
+            Add Tag
+          </Button>
+          <Button onClick={openNewDialog}>
+            <Plus className="h-4 w-4 mr-2" />
+            New Blog Post
+          </Button>
+        </div>
       </div>
 
       {/* Table Card with filters in header */}
@@ -1056,7 +1058,7 @@ export default function BlogsPage() {
             <div>
               <Label htmlFor="content">Full Content</Label>
               <div className="border rounded-md overflow-hidden mt-1">
-                <ReactQuill
+                <ReactQuill className="min-h-[300px]"
                   theme="snow"
                   value={formData.content}
                   onChange={(value) =>
