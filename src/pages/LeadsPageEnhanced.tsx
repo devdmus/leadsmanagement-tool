@@ -163,9 +163,8 @@ export default function LeadsPageEnhanced() {
   const { currentSite } = useSite();
   const { toast } = useToast();
   const isAdmin = profile?.role === 'super_admin' || profile?.role === 'admin';
-  // Roles explicitly allowed to delete leads (regardless of DB permission overrides)
-  const canDeleteLead = hasPermission('leads', 'write') ||
-    ['super_admin', 'admin', 'lead_manager', 'sales_person'].includes(profile?.role || '');
+  // Only these roles can delete leads — role list is the sole gatekeeper
+  const canDeleteLead = ['super_admin', 'admin', 'seo_manager'].includes(profile?.role || '');
 
 
   // Load saved credentials from localStorage on mount
@@ -691,6 +690,21 @@ export default function LeadsPageEnhanced() {
     );
   };
 
+  // Mask email: show first 3 chars + XXXXXXX (cap at 10 total) + ...
+  const maskEmail = (email: string) => {
+    if (!email) return 'XXX...';
+    const visible = email.slice(0, 3);
+    return `${visible}XXXXXXX...`;
+  };
+
+  // Mask phone: show first 3 chars + X for each remaining digit
+  const maskPhone = (phone: string | null) => {
+    if (!phone) return '-';
+    const visible = phone.slice(0, 3);
+    const masked = 'X'.repeat(Math.max(4, phone.length - 3));
+    return `${visible}${masked}`;
+  };
+
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
       setSelectedLeads(leads.map(lead => lead.id));
@@ -855,8 +869,8 @@ export default function LeadsPageEnhanced() {
                             </TableCell>
                           )}
                           <TableCell className="font-medium">{lead.name}</TableCell>
-                          <TableCell className="max-w-[200px] truncate">{lead.email}</TableCell>
-                          <TableCell className="hidden md:table-cell">{lead.phone || '-'}</TableCell>
+                          <TableCell className="max-w-[200px] truncate text-muted-foreground font-mono text-sm">{maskEmail(lead.email)}</TableCell>
+                          <TableCell className="hidden md:table-cell text-muted-foreground font-mono text-sm">{maskPhone(lead.phone)}</TableCell>
                           <TableCell>{getSourceBadge(lead.source)}</TableCell>
                           <TableCell>{getStatusBadge(lead.status)}</TableCell>
                           <TableCell className="hidden lg:table-cell">

@@ -153,6 +153,17 @@ function crm_create_custom_tables()
         KEY assigned_to (assigned_to)
     ) $charset_collate;";
 
+    // Blog Assignments Table
+    $table_blog_assignments = $wpdb->prefix . 'crm_blog_assignments';
+    $sql_blog_assignments = "CREATE TABLE IF NOT EXISTS $table_blog_assignments (
+        id bigint(20) NOT NULL AUTO_INCREMENT,
+        post_id varchar(100) NOT NULL,
+        assigned_to varchar(100),
+        updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        UNIQUE KEY post_id (post_id)
+    ) $charset_collate;";
+
     require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
     dbDelta($sql_logs);
     dbDelta($sql_leads);
@@ -160,6 +171,7 @@ function crm_create_custom_tables()
     dbDelta($sql_reads);
     dbDelta($sql_dismissals);
     dbDelta($sql_seo_meta);
+    dbDelta($sql_blog_assignments);
 }
 
 register_activation_hook(__FILE__, 'crm_create_custom_tables');
@@ -331,6 +343,26 @@ add_action('rest_api_init', function () {
             'callback' => 'crm_delete_seo_meta',
             'permission_callback' => 'crm_check_api_key'
         ]
+    ]);
+
+    // Blog Assignments
+    register_rest_route('crm/v1', '/blog-assignments', [
+        [
+            'methods' => 'GET',
+            'callback' => 'crm_get_blog_assignments',
+            'permission_callback' => 'crm_check_api_key'
+        ],
+        [
+            'methods' => 'POST',
+            'callback' => 'crm_upsert_blog_assignment',
+            'permission_callback' => 'crm_check_api_key'
+        ]
+    ]);
+
+    register_rest_route('crm/v1', '/blog-assignments/bulk', [
+        'methods' => 'POST',
+        'callback' => 'crm_bulk_assign_blogs',
+        'permission_callback' => 'crm_check_api_key'
     ]);
 });
 
@@ -1033,4 +1065,60 @@ function crm_delete_seo_meta($request)
     $id = intval($request['id']);
     $wpdb->delete($table, ['id' => $id]);
     return rest_ensure_response(['status' => 'success']);
+}
+
+/**
+ * BLOG ASSIGNMENTS LOGIC
+ */
+function crm_get_blog_assignments()
+{
+    global $wpdb;
+    $table = $wpdb->prefix . 'crm_blog_assignments';
+    $rows = $wpdb->get_results("SELECT post_id, assigned_to FROM $table", ARRAY_A);
+    return rest_ensure_response($rows ?: []);
+}
+
+function crm_upsert_blog_assignment($request)
+{
+    global $wpdb;
+    $table = $wpdb->prefix . 'crm_blog_assignments';
+    $data = $request->get_json_params();
+
+    if (empty($data['post_id'])) {
+        return new WP_Error('missing_field', 'post_id required', ['status' => 400]);
+    }
+
+    $post_id = sanitize_text_field($data['post_id']);
+    $assigned_to = isset($data['assigned_to']) ? sanitize_text_field($data['assigned_to']) : null;
+
+    $existing = $wpdb->get_var($wpdb->prepare("SELECT id FROM $table WHERE post_id = %s", $post_id));
+    if ($existing) {
+        $wpdb->update($table, ['assigned_to' => $assigned_to, 'updated_at' => current_time('mysql')], ['post_id' => $post_id]);
+    } else {
+        $wpdb->insert($table, ['post_id' => $post_id, 'assigned_to' => $assigned_to, 'updated_at' => current_time('mysql')]);
+    }
+
+    return rest_ensure_response(['status' => 'success', 'post_id' => $post_id, 'assigned_to' => $assigned_to]);
+}
+
+function crm_bulk_assign_blogs($request)
+{
+    global $wpdb;
+    $table = $wpdb->prefix . 'crm_blog_assignments';
+    $data = $request->get_json_params();
+
+    $post_ids = $data['post_ids'] ?? [];
+    $assigned_to = isset($data['assigned_to']) ? sanitize_text_field($data['assigned_to']) : null;
+
+    foreach ($post_ids as $post_id) {
+        $post_id = sanitize_text_field($post_id);
+        $existing = $wpdb->get_var($wpdb->prepare("SELECT id FROM $table WHERE post_id = %s", $post_id));
+        if ($existing) {
+            $wpdb->update($table, ['assigned_to' => $assigned_to, 'updated_at' => current_time('mysql')], ['post_id' => $post_id]);
+        } else {
+            $wpdb->insert($table, ['post_id' => $post_id, 'assigned_to' => $assigned_to, 'updated_at' => current_time('mysql')]);
+        }
+    }
+
+    return rest_ensure_response(['status' => 'success', 'count' => count($post_ids)]);
 }

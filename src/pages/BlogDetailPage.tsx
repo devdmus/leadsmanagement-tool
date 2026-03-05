@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { UserSearchSelect } from '@/components/common/UserSearchSelect';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useWordPressApi } from '@/hooks/useWordPressApi';
-import { profilesApi, activityLogsApi } from '@/db/api';
+import { profilesApi, activityLogsApi, blogAssignmentsApi } from '@/db/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSite } from '@/contexts/SiteContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -80,10 +80,9 @@ export default function BlogDetailPage() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
     const { profile, hasPermission } = useAuth();
-    const isAdmin = profile?.role === 'super_admin' || profile?.role === 'admin';
-    // Roles that are explicitly allowed to delete blogs (regardless of DB permission overrides)
-    const canDeleteBlog = hasPermission('blogs', 'write') ||
-        ['super_admin', 'admin', 'seo_manager', 'seo_person'].includes(profile?.role || '');
+    const isAdmin = profile?.role === 'super_admin' || profile?.role === 'admin' || profile?.role === 'seo_manager';
+    // Only these roles can delete blogs — role list is the sole gatekeeper
+    const canDeleteBlog = ['super_admin', 'admin', 'seo_manager'].includes(profile?.role || '');
     const { currentSite } = useSite();
     const { toast } = useToast();
     const wordpressApi = useWordPressApi();
@@ -146,17 +145,21 @@ export default function BlogDetailPage() {
         if (!id) return;
         setLoading(true);
         try {
-            const [allPosts, wpCategories, wpTags, usersData] = await Promise.all([
+            const [allPosts, wpCategories, wpTags, usersData, assignments] = await Promise.all([
                 wordpressApi.getAllPosts(),
                 wordpressApi.getCategories(),
                 wordpressApi.getTags(),
                 profilesApi.getAll(),
+                blogAssignmentsApi.getAll(),
             ]);
 
             const post = allPosts.find((p: any) => String(p.id) === id);
             if (!post) throw new Error('Blog not found');
 
             const mapped = mapWpPostToBlog(post);
+            // Prefer server assignment; fall back to WP post field then localStorage
+            const resolvedAssignment = assignments[mapped.id] ?? mapped.assigned_to ?? null;
+            mapped.assigned_to = resolvedAssignment;
             setBlog(mapped);
             setCategories(wpCategories);
             setTags(wpTags);
@@ -173,7 +176,7 @@ export default function BlogDetailPage() {
                 tags: mapped.tags,
                 tag_ids: mapped.tag_ids,
                 status: mapped.status,
-                assigned_to: isAdmin ? ((mapped as any).assigned_to || 'unassigned') : (profile?.id || 'unassigned'),
+                assigned_to: isAdmin ? (resolvedAssignment || 'unassigned') : (profile?.id || 'unassigned'),
             });
         } catch (error) {
             console.error('Failed to load blog:', error);
@@ -190,8 +193,22 @@ export default function BlogDetailPage() {
             return;
         }
 
+        // Detect which fields changed before saving
+        const changedFields: string[] = [];
+        if (blog) {
+            if (formData.title !== blog.title) changedFields.push('Title');
+            if (formData.description !== blog.description) changedFields.push('Excerpt');
+            if (formData.status !== blog.status) changedFields.push('Status');
+            if (formData.category !== blog.category) changedFields.push('Category');
+            if (JSON.stringify([...formData.tags].sort()) !== JSON.stringify([...blog.tags].sort())) changedFields.push('Tags');
+            if (formData.feature_image !== (blog.feature_image || '')) changedFields.push('Feature Image');
+            if (formData.assigned_to !== (blog.assigned_to || 'unassigned')) changedFields.push('Assigned To');
+            if (formData.content !== (blog.content || '')) changedFields.push('Content');
+        }
+
         setSaving(true);
         try {
+            const newAssignment = formData.assigned_to === 'unassigned' ? null : formData.assigned_to;
             const postData = {
                 title: formData.title,
                 content: formData.content || '',
@@ -200,22 +217,47 @@ export default function BlogDetailPage() {
                 ...(formData.feature_image_id && { featured_media: formData.feature_image_id }),
                 ...(formData.category_id && { categories: [formData.category_id] }),
                 ...(formData.tag_ids.length > 0 && { tags: formData.tag_ids }),
-                assigned_to:
-                    formData.assigned_to === 'unassigned' ? null : formData.assigned_to,
+                assigned_to: newAssignment,
             };
 
             await wordpressApi.updatePost(Number(id), postData);
+
+            // Save assignment server-side (and update localStorage cache)
+            await blogAssignmentsApi.set(id, newAssignment);
 
             await activityLogsApi.create({
                 user_id: profile.id as string,
                 action: 'update_blog',
                 resource_type: 'blog',
                 resource_id: id,
-                details: { title: formData.title },
+                details: { title: formData.title, changed_fields: changedFields },
             });
 
-            toast({ title: 'Success', description: 'Blog updated successfully' });
-            await loadAll();
+            const changeMsg = changedFields.length > 0
+                ? `Changed: ${changedFields.join(', ')}`
+                : 'Blog saved (no changes detected)';
+
+            toast({ title: 'Blog Updated Successfully', description: changeMsg });
+
+            // Reload fresh data for this specific post (bypasses stale cache)
+            const updatedPost = await wordpressApi.getPost(Number(id));
+            const mapped = mapWpPostToBlog(updatedPost);
+            // Always use what we just saved (server-side assignment is the source of truth)
+            mapped.assigned_to = newAssignment;
+            setBlog(mapped);
+            setFormData({
+                title: mapped.title,
+                description: mapped.description,
+                content: mapped.content || '',
+                feature_image: mapped.feature_image || '',
+                feature_image_id: mapped.feature_image_id,
+                category: mapped.category,
+                category_id: mapped.category_id,
+                tags: mapped.tags,
+                tag_ids: mapped.tag_ids,
+                status: mapped.status,
+                assigned_to: isAdmin ? (mapped.assigned_to || 'unassigned') : (profile?.id || 'unassigned'),
+            });
         } catch (error) {
             console.error('Failed to update blog:', error);
             toast({

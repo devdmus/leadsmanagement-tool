@@ -330,6 +330,76 @@ export const followUpsApi = {
     }
 };
 
+// Blog Assignments API — server-side via crm/v1/blog-assignments, localStorage as fallback
+export const blogAssignmentsApi = {
+    _getBase(): string | null {
+        try {
+            const site = getCurrentSiteFromCache();
+            if (site?.url) {
+                let url = site.url.replace(/\/$/, '');
+                if (!url.includes('/wp-json')) url += '/wp-json';
+                return `${url}/crm/v1`;
+            }
+        } catch { }
+        return null;
+    },
+    _getKey(): string {
+        return (import.meta.env.VITE_WP_API_KEY as string) || 'SECRET123';
+    },
+    _getLocal(): Record<string, string | null> {
+        try { return JSON.parse(localStorage.getItem('crm_blog_assignments') || '{}'); } catch { return {}; }
+    },
+    _setLocal(map: Record<string, string | null>) {
+        localStorage.setItem('crm_blog_assignments', JSON.stringify(map));
+    },
+    async getAll(): Promise<Record<string, string | null>> {
+        const base = this._getBase();
+        if (base) {
+            try {
+                const res = await fetch(`${base}/blog-assignments?api_key=${this._getKey()}&_=${Date.now()}`);
+                if (res.ok) {
+                    const rows: Array<{ post_id: string; assigned_to: string | null }> = await res.json();
+                    const map: Record<string, string | null> = {};
+                    rows.forEach(r => { map[r.post_id] = r.assigned_to || null; });
+                    this._setLocal(map);
+                    return map;
+                }
+            } catch { }
+        }
+        return this._getLocal();
+    },
+    async set(postId: string, userId: string | null): Promise<void> {
+        const map = this._getLocal();
+        map[postId] = userId;
+        this._setLocal(map);
+        const base = this._getBase();
+        if (base) {
+            try {
+                await fetch(`${base}/blog-assignments?api_key=${this._getKey()}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ post_id: postId, assigned_to: userId }),
+                });
+            } catch { }
+        }
+    },
+    async bulkSet(postIds: string[], userId: string | null): Promise<void> {
+        const map = this._getLocal();
+        postIds.forEach(id => { map[id] = userId; });
+        this._setLocal(map);
+        const base = this._getBase();
+        if (base) {
+            try {
+                await fetch(`${base}/blog-assignments/bulk?api_key=${this._getKey()}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ post_ids: postIds, assigned_to: userId }),
+                });
+            } catch { }
+        }
+    },
+};
+
 // Blogs API (Placeholder - will use local storage for now since crm/v1/blogs doesn't exist)
 export const blogsApi = {
     async getAll() {
