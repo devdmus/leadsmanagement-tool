@@ -25,36 +25,22 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Badge } from '@/components/ui/badge';
 import { LogOut, User, Menu } from 'lucide-react';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { AppSidebar } from './AppSidebar';
-import { cn } from '@/lib/utils';
 
 export function AppHeader() {
   const { profile, signOut } = useAuth();
-  const { currentSite, setCurrentSite, getAccessibleSites } = useSite();
+  const { currentSite, setCurrentSite, getAccessibleSites, canSwitchSites } = useSite();
   const navigate = useNavigate();
   const accessibleSites = profile ? getAccessibleSites(String((profile as Profile).id), String((profile as Profile).role)) : [];
+  const showSiteSwitcher = profile ? canSwitchSites(String((profile as Profile).id), String((profile as Profile).role)) : false;
 
   const handleSignOut = async () => {
     await signOut();
   };
 
-  const getRoleColor = (role: string) => {
-    switch (role) {
-      case 'admin':
-        return 'bg-primary text-white';
-      case 'sales':
-        return 'bg-secondary text-secondary-foreground';
-      case 'seo':
-        return 'bg-info text-white';
-      case 'client':
-        return 'bg-muted text-muted-foreground';
-      default:
-        return 'bg-muted text-muted-foreground';
-    }
-  };
+
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 bg-gradient-to-b from-[#1F86E0] to-[#0A4F8B]">
@@ -80,11 +66,13 @@ export function AppHeader() {
         <div className="flex-1" />
 
         <div className="flex items-center gap-2">
-          <SiteSwitcher
-            accessibleSites={accessibleSites}
-            currentSite={currentSite}
-            setCurrentSite={(id) => setCurrentSite(String(id))}
-          />
+          {showSiteSwitcher && (
+            <SiteSwitcher
+              accessibleSites={accessibleSites}
+              currentSite={currentSite}
+              setCurrentSite={(id) => setCurrentSite(String(id))}
+            />
+          )}
           <NotificationCenter />
 
           {profile && (

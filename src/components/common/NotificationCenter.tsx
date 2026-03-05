@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Bell, Check, X } from 'lucide-react';
+import { Bell, Check, X, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -9,6 +9,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { useAuth } from '@/contexts/AuthContext';
+import { useSite } from '@/contexts/SiteContext';
 // Supabase removed
 import { cn } from '@/lib/utils';
 
@@ -29,38 +30,109 @@ export function NotificationCenter() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [open, setOpen] = useState(false);
-  const { profile } = useAuth();
+  const { profile, userType } = useAuth();
+  const { currentSite } = useSite();
 
   useEffect(() => {
     if (profile) {
       loadNotifications();
-      subscribeToNotifications();
+      const interval = setInterval(loadNotifications, 30000); // Poll every 30s
+      return () => clearInterval(interval);
     }
-  }, [profile]);
+  }, [profile, currentSite?.id]);
 
   const loadNotifications = async () => {
-    // Mock notifications
-    setNotifications([]);
-    setUnreadCount(0);
+    try {
+      if (!profile) return;
+
+      const userId = userType === 'super_admin' ? profile.id.toString() : profile.id;
+      const isSuperAdmin = userType === 'super_admin';
+
+      const data = await import('@/db/api').then(m => m.notificationsApi.getAll(
+        userId,
+        currentSite?.id,
+        isSuperAdmin,
+        userType || '' // Pass string to avoid lint error
+      ));
+
+      const normalizedData = (data || []).map((n: any) => ({
+        ...n,
+        id: n.id.toString(), // Normalize to string so markAsRead comparison works reliably
+        is_read: n.is_read === true || n.is_read === 1 || n.is_read === '1'
+      }));
+
+      // Deduplicate by ID (safety net for any old duplicate rows in the DB)
+      const seen = new Set<string>();
+      const deduplicated = normalizedData.filter((n: any) => {
+        if (seen.has(n.id)) return false;
+        seen.add(n.id);
+        return true;
+      });
+
+      setNotifications(deduplicated);
+      setUnreadCount(deduplicated.filter((n: any) => !n.is_read).length);
+    } catch (error) {
+      console.error('Failed to load notifications:', error);
+    }
   };
 
-  const subscribeToNotifications = () => {
-    // Mock subscription
-    return () => { };
+  // Namespace the ID to prevent collisions between SA and WP users (both often use ID 1)
+  const getUserId = () => {
+    if (!profile) return '';
+    const prefix = userType === 'super_admin' ? 'sa_' : 'wp_';
+    return `${prefix}${profile.id}`;
   };
+  const getIsSuperAdmin = () => userType === 'super_admin';
 
   const markAsRead = async (notificationId: string) => {
-    setNotifications(notifications.map(n => n.id === notificationId ? { ...n, is_read: true } : n));
-    setUnreadCount(prev => Math.max(0, prev - 1));
+    try {
+      const userId = getUserId();
+      await import('@/db/api').then(m => m.notificationsApi.markAsRead(notificationId, userId));
+      // Only update local state after server confirms success
+      setNotifications(prev => prev.map(n => n.id === notificationId ? { ...n, is_read: true } : n));
+      setUnreadCount(prev => Math.max(0, prev - 1));
+    } catch (error) {
+      console.error('Failed to mark as read:', error);
+      // Re-fetch to keep UI in sync with actual server state
+      loadNotifications();
+    }
   };
 
   const markAllAsRead = async () => {
-    setNotifications(notifications.map(n => ({ ...n, is_read: true })));
-    setUnreadCount(0);
+    try {
+      const userId = getUserId();
+      const isSuperAdmin = getIsSuperAdmin();
+      await import('@/db/api').then(m => (m.notificationsApi as any).markAllAsRead(userId, isSuperAdmin));
+      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+      setUnreadCount(0);
+    } catch (error) {
+      console.error('Failed to mark all as read:', error);
+      loadNotifications();
+    }
+  };
+
+  const clearNotifications = async () => {
+    try {
+      const userId = getUserId();
+      const isSuperAdmin = getIsSuperAdmin();
+      await import('@/db/api').then(m => (m.notificationsApi as any).clearAll(userId, isSuperAdmin, userType));
+      // Remove all from local state immediately
+      setNotifications([]);
+      setUnreadCount(0);
+    } catch (error) {
+      console.error('Failed to clear notifications:', error);
+      loadNotifications();
+    }
   };
 
   const deleteNotification = async (notificationId: string) => {
-    setNotifications(notifications.filter(n => n.id !== notificationId));
+    try {
+      const userId = getUserId();
+      await import('@/db/api').then(m => m.notificationsApi.delete?.(notificationId, userId));
+      setNotifications(notifications.filter(n => n.id !== notificationId));
+    } catch (error) {
+      console.error('Failed to delete notification:', error);
+    }
   };
 
   const getTypeColor = (type: string) => {
@@ -81,7 +153,7 @@ export function NotificationCenter() {
       <PopoverTrigger asChild>
         {/* changed css */}
         <Button variant="ghost" size="icon" className="relative hover:bg-muted/30">
-          {/* css changed  */} 
+          {/* css changed  */}
           <Bell className="h-5 w-5 text-white " />
           {unreadCount > 0 && (
             <Badge
@@ -96,12 +168,25 @@ export function NotificationCenter() {
       <PopoverContent className="w-96 p-0" align="end">
         <div className="flex items-center justify-between p-4 border-b">
           <h3 className="font-semibold">Notifications</h3>
-          {unreadCount > 0 && (
-            <Button variant="ghost" size="sm" onClick={markAllAsRead}>
-              <Check className="h-4 w-4 mr-2" />
-              Mark all read
-            </Button>
-          )}
+          <div className="flex items-center gap-1">
+            {unreadCount > 0 && (
+              <Button variant="ghost" size="sm" onClick={markAllAsRead}>
+                <Check className="h-4 w-4 mr-1" />
+                Mark all read
+              </Button>
+            )}
+            {notifications.length > 0 && unreadCount === 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground hover:text-destructive"
+                onClick={clearNotifications}
+              >
+                <Trash2 className="h-4 w-4 mr-1" />
+                Clear
+              </Button>
+            )}
+          </div>
         </div>
         <ScrollArea className="h-[400px]">
           {notifications.length === 0 ? (

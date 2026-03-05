@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { UserSearchSelect } from '@/components/common/UserSearchSelect';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useWordPressApi } from '@/hooks/useWordPressApi';
 import { profilesApi, activityLogsApi } from '@/db/api';
@@ -78,7 +79,11 @@ type Blog = {
 export default function BlogDetailPage() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
-    const { profile } = useAuth();
+    const { profile, hasPermission } = useAuth();
+    const isAdmin = profile?.role === 'super_admin' || profile?.role === 'admin';
+    // Roles that are explicitly allowed to delete blogs (regardless of DB permission overrides)
+    const canDeleteBlog = hasPermission('blogs', 'write') ||
+        ['super_admin', 'admin', 'seo_manager', 'seo_person'].includes(profile?.role || '');
     const { currentSite } = useSite();
     const { toast } = useToast();
     const wordpressApi = useWordPressApi();
@@ -168,7 +173,7 @@ export default function BlogDetailPage() {
                 tags: mapped.tags,
                 tag_ids: mapped.tag_ids,
                 status: mapped.status,
-                assigned_to: (mapped as any).assigned_to || 'unassigned',
+                assigned_to: isAdmin ? ((mapped as any).assigned_to || 'unassigned') : (profile?.id || 'unassigned'),
             });
         } catch (error) {
             console.error('Failed to load blog:', error);
@@ -196,7 +201,7 @@ export default function BlogDetailPage() {
                 ...(formData.category_id && { categories: [formData.category_id] }),
                 ...(formData.tag_ids.length > 0 && { tags: formData.tag_ids }),
                 assigned_to:
-                    formData.assigned_to === 'unassigned' ? (profile?.id || null) : formData.assigned_to,
+                    formData.assigned_to === 'unassigned' ? null : formData.assigned_to,
             };
 
             await wordpressApi.updatePost(Number(id), postData);
@@ -349,31 +354,33 @@ export default function BlogDetailPage() {
                         Save Changes
                     </Button>
 
-                    <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                            <Button variant="destructive">
-                                <Trash2 className="h-4 w-4 mr-2" />
-                                Delete Blog
-                            </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                            <AlertDialogHeader>
-                                <AlertDialogTitle>Delete Blog?</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                    This will permanently delete "{blog.title}" from WordPress. This action cannot be undone.
-                                </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction
-                                    onClick={handleDelete}
-                                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                                >
-                                    Delete
-                                </AlertDialogAction>
-                            </AlertDialogFooter>
-                        </AlertDialogContent>
-                    </AlertDialog>
+                    {canDeleteBlog && (
+                      <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                              <Button variant="destructive">
+                                  <Trash2 className="h-4 w-4 mr-2" />
+                                  Delete Blog
+                              </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                              <AlertDialogHeader>
+                                  <AlertDialogTitle>Delete Blog?</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                      This will permanently delete "{blog.title}" from WordPress. This action cannot be undone.
+                                  </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction
+                                      onClick={handleDelete}
+                                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                  >
+                                      Delete
+                                  </AlertDialogAction>
+                              </AlertDialogFooter>
+                          </AlertDialogContent>
+                      </AlertDialog>
+                    )}
                 </div>
             </div>
 
@@ -462,25 +469,15 @@ export default function BlogDetailPage() {
                             </Select>
                         </div>
 
+                        {/* Always show Assigned To; non-admins see it pre-filled with their own name, disabled */}
                         <div className="space-y-2">
                             <Label htmlFor="assigned_to">Assigned To</Label>
-                            <Select
+                            <UserSearchSelect
+                                users={users}
                                 value={formData.assigned_to}
                                 onValueChange={value => setFormData(prev => ({ ...prev, assigned_to: value }))}
-                                disabled={saving}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Select user" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="unassigned">Unassigned</SelectItem>
-                                    {users.map(user => (
-                                        <SelectItem key={user.id} value={user.id}>
-                                            {user.username} ({user.role})
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                                disabled={saving || !isAdmin}
+                            />
                         </div>
                     </div>
 

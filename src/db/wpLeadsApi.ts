@@ -1,41 +1,30 @@
 /**
  * WP Leads API — site-aware version.
  *
- * Uses the current site's API base dynamically from localStorage
- * (read from SiteContext's persisted state), falling back to VITE_API_BASE.
+ * Reads the current site from the in-memory siteCache (populated by SiteContext
+ * on load from DB), falling back to VITE_API_BASE env variable.
  */
+import { getCurrentSiteFromCache } from '@/utils/siteCache';
 
 const ENV_API_BASE = import.meta.env.VITE_API_BASE;
 const ENV_API_KEY = import.meta.env.VITE_WP_API_KEY;
 
 /**
  * Derive the leads API base from the currently selected site.
- *
- * The leads plugin exposes a custom REST route at /wp-api on each site.
- * For example, the default site uses the relative path "/wp-api".
- * When a different site is selected, we prefix that site's URL to /wp-api.
  */
 function getApiBase(): string {
   try {
-    const currentSiteId = localStorage.getItem('crm_current_site_id');
-    const savedSites = localStorage.getItem('crm_wp_sites');
-    if (currentSiteId && savedSites) {
-      const sites = JSON.parse(savedSites);
-      const site = sites.find((s: any) => s.id === currentSiteId);
-      if (site?.url && !site.isDefault) {
-        // For non-default sites, we must hit the full URL.
-        // The custom CRM plugin endpoint is located at /wp-json/crm/v1 on the WordPress site.
-        // We cannot use /wp-api here because that is a local Vite proxy path.
-        let url = site.url.replace(/\/$/, '');
-        if (!url.includes('/wp-json')) url += '/wp-json';
-        return url + '/crm/v1';
-      }
+    const site = getCurrentSiteFromCache();
+    if (site?.url) {
+      let url = site.url.replace(/\/$/, '');
+      if (!url.includes('/wp-json')) url += '/wp-json';
+      return url + '/crm/v1';
     }
   } catch {
     // fall through
   }
-  // Default site or no site selected — use the env variable (/wp-api)
-  return ENV_API_BASE;
+  // Fallback to env variable if no site selected
+  return ENV_API_BASE || '';
 }
 
 /** Get the API key (same for all sites for now). */
@@ -69,9 +58,10 @@ export const wpLeadsApi = {
     console.log(`[wpLeadsApi] Fetched ${remoteLeads.length} leads from ${API_BASE}`);
 
     const localUpdates = getLocalUpdates();
+    let hasChanges = false;
 
     // Merge remote data with local overrides and normalize IDs
-    return remoteLeads.map((lead: any) => {
+    const mergedLeads = remoteLeads.map((lead: any) => {
       const lid = lead.id.toString();
 
       // Normalize source (fix potential backend typo)
@@ -85,14 +75,33 @@ export const wpLeadsApi = {
         source,
         status: lead.status || 'pending', // Default status if missing
         assigned_to: lead.assigned_to ? lead.assigned_to.toString() : null,
-        created_at: lead.created_at || new Date().toISOString()
+        created_at: lead.created_at || new Date().toISOString(),
+        notes: lead.notes || '',
+        follow_up_date: lead.follow_up_date || null,
+        follow_up_status: lead.follow_up_status || 'pending',
+        follow_up_type: lead.follow_up_type || 'call'
       };
 
+      // Sync Check: If server lead has newer updated_at than our local record, clear our local record
       if (localUpdates[lid]) {
+        const localTime = new Date(localUpdates[lid]._updated_at).getTime();
+        const remoteTime = new Date(lead.updated_at || 0).getTime();
+
+        if (remoteTime >= localTime) {
+          delete localUpdates[lid];
+          hasChanges = true;
+          return normalizedLead;
+        }
         return { ...normalizedLead, ...localUpdates[lid] };
       }
       return normalizedLead;
     });
+
+    if (hasChanges) {
+      localStorage.setItem('crm_leads_local_updates', JSON.stringify(localUpdates));
+    }
+
+    return mergedLeads;
   },
 
   async getById(id: string) {
@@ -116,7 +125,11 @@ export const wpLeadsApi = {
           source,
           status: lead.status || 'pending',
           assigned_to: lead.assigned_to ? lead.assigned_to.toString() : null,
-          created_at: lead.created_at || new Date().toISOString()
+          created_at: lead.created_at || new Date().toISOString(),
+          notes: lead.notes || '',
+          follow_up_date: lead.follow_up_date || null,
+          follow_up_status: lead.follow_up_status || 'pending',
+          follow_up_type: lead.follow_up_type || 'call'
         };
 
         if (localUpdates[lid]) {
@@ -167,6 +180,14 @@ export const wpLeadsApi = {
 
     console.log('🚀 Sending Update Request:', id, data);
 
+    // Helper to clear the local cache entry once the server confirms the save
+    const clearLocalCache = () => {
+      const updates = getLocalUpdates();
+      delete updates[id];
+      localStorage.setItem('crm_leads_local_updates', JSON.stringify(updates));
+      console.log('🗑️ Cleared local cache for ID:', id, '(server confirmed save)');
+    };
+
     // Try the direct endpoint first
     try {
       const res = await fetch(`${API_BASE}/lead/${id}?api_key=${API_KEY}`, {
@@ -177,7 +198,12 @@ export const wpLeadsApi = {
         body: JSON.stringify(data),
       });
 
-      if (res.ok) return res.json();
+      if (res.ok) {
+        // Server saved successfully — remove the local override so all users
+        // see the same server data on next fetch (fixes cross-user sync bug).
+        clearLocalCache();
+        return res.json();
+      }
 
       console.warn('⚠️ Direct update failed, trying fallback to /lead');
 
@@ -190,14 +216,18 @@ export const wpLeadsApi = {
         body: JSON.stringify({ ...data, id, action: 'update' }),
       });
 
-      if (fallbackRes.ok) return fallbackRes.json();
+      if (fallbackRes.ok) {
+        clearLocalCache();
+        return fallbackRes.json();
+      }
 
     } catch (e) {
       console.error('❌ Network error during update:', e);
     }
 
-    // If both fail, we still return "success" because we saved it locally
-    // This stops the "failed update" toast and makes the app usable.
+    // If both fail, we still return "success" because we saved it locally.
+    // The local override will be cleared automatically on the next fetch
+    // once the server's updated_at timestamp catches up.
     console.log('✅ Update preserved in local cache (Backend sync pending)');
     return { success: true, local: true };
   },

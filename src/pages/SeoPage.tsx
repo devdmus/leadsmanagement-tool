@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
+import { UserSearchSelect } from '@/components/common/UserSearchSelect';
 import { seoMetaTagsApi, activityLogsApi, profilesApi, bulkOperations } from '@/db/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWordPressApi } from '@/hooks/useWordPressApi';
 import { useSite } from '@/contexts/SiteContext';
+import { notificationHelper } from '@/lib/notificationHelper';
 import { Checkbox } from '@/components/ui/checkbox';
 import type { SeoMetaTag, Profile } from '../types/types';
 
@@ -29,23 +31,12 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/components/ui/alert-dialog';
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, Edit, Trash2, MoreVertical, UserPlus, Users } from 'lucide-react';
+import { Plus, Edit, UserPlus } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -74,6 +65,7 @@ type WPPost = {
 
 export default function SeoPage() {
   const [tags, setTags] = useState<SeoMetaTag[]>([]);
+  const [allTags, setAllTags] = useState<SeoMetaTag[]>([]); // All tags (unfiltered) — used for usedPostIds check
   const [loading, setLoading] = useState(true);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -84,6 +76,7 @@ export default function SeoPage() {
   const [bulkAssignUser, setBulkAssignUser] = useState<string>('unassigned');
 
   const { profile, hasPermission, getWpAuthHeader } = useAuth();
+  const isAdmin = profile?.role === 'super_admin' || profile?.role === 'admin';
   const { toast } = useToast();
   const wordpressApi = useWordPressApi();
   const { currentSite } = useSite();
@@ -102,6 +95,12 @@ export default function SeoPage() {
     }
   }, [profile?.id, currentSite?.id]); // Reload when profile or site changes
 
+  useEffect(() => {
+    if (isCreateDialogOpen && !isAdmin && profile) {
+      setFormData(prev => ({ ...prev, assigned_to: profile.id }));
+    }
+  }, [isCreateDialogOpen]);
+
   const loadTags = async () => {
     try {
       setLoading(true);
@@ -111,12 +110,14 @@ export default function SeoPage() {
       ]);
 
       let filteredTags = data;
-      // If SEO Person, only show assigned tags. Admin and SEO Manager see all.
-      if (profile && profile.role === 'seo_person') {
+      // Team members only see tags assigned to them. Admin, Super Admin, and Managers see all.
+      const teamRoles = ['sales_person', 'seo_person', 'client'];
+      if (profile && teamRoles.includes(profile.role)) {
         filteredTags = data.filter((tag: SeoMetaTag) => tag.assigned_to === profile.id);
       }
 
-      setTags(filteredTags);
+      setAllTags(data);          // Keep full list for "already used" post filtering
+      setTags(filteredTags);     // Role-filtered list shown in the table
       setUsers(usersData as Profile[]);
     } catch (error) {
       console.error('Failed to load SEO tags:', error);
@@ -130,8 +131,12 @@ export default function SeoPage() {
     }
   };
 
-  const updateWpSeoFields = async () => {
-    if (!formDatanew.post_id || !formDatanew.rest_base) return
+  const updateWpSeoFields = async (
+    postId: string,
+    restBase: string,
+    data: { title: string; description: string; keywords: string } | null
+  ) => {
+    if (!postId || !restBase) return;
 
     const authHeader = getWpAuthHeader();
     if (!authHeader) {
@@ -140,14 +145,13 @@ export default function SeoPage() {
         description: 'Please login with your WordPress credentials to update SEO fields.',
         variant: 'destructive',
       });
-      // Optional: redirect to login or open login modal
       return;
     }
 
     try {
       const wpBaseUrl = wordpressApi.getBaseUrl();
       const response = await fetch(
-        `${wpBaseUrl}/${formDatanew.rest_base}/${formDatanew.post_id}`,
+        `${wpBaseUrl}/${restBase}/${postId}`,
         {
           method: "POST",
           headers: {
@@ -156,9 +160,9 @@ export default function SeoPage() {
           },
           body: JSON.stringify({
             acf: {
-              seo_title: formData.title,
-              seo_description: formData.description,
-              seo_keywords: formData.keywords,
+              seo_title: data?.title || "",
+              seo_description: data?.description || "",
+              seo_keywords: data?.keywords || "",
             }
           }),
         }
@@ -166,19 +170,18 @@ export default function SeoPage() {
 
       if (!response.ok) {
         const error = await response.json();
-        console.error("WordPress SEO Update Error:", error);
-        throw new Error(error.message || "Failed to update WordPress SEO fields");
+        console.error("WordPress SEO Sync Error:", error);
+        throw new Error(error.message || "Failed to sync WordPress SEO fields");
       }
 
       const result = await response.json();
-      console.log("WP SEO Update Success:", result);
+      console.log("WP SEO Sync Success:", result);
       return result;
     } catch (error) {
-      console.error("Failed to update WordPress SEO fields:", error);
-      // Don't throw - allow the local DB update to succeed even if WP update fails
+      console.error("Failed to sync WordPress SEO fields:", error);
       toast({
         title: 'Warning',
-        description: 'SEO data saved locally, but WordPress update failed. Check if ACF fields are configured.',
+        description: 'SEO data saved locally, but WordPress sync failed. Check if ACF fields are configured.',
         variant: 'destructive',
       });
     }
@@ -200,14 +203,19 @@ export default function SeoPage() {
 
       await seoMetaTagsApi.create({
         page_identifier: postTitle,
+        post_id: formDatanew.post_id,
+        rest_base: formDatanew.rest_base,
         title: formData.title,
         keywords: formData.keywords || null,
-
         description: formData.description || null,
         assigned_to: formData.assigned_to === 'unassigned' ? null : formData.assigned_to,
       });
 
-      await updateWpSeoFields();
+      await updateWpSeoFields(formDatanew.post_id, formDatanew.rest_base, {
+        title: formData.title,
+        description: formData.description,
+        keywords: formData.keywords
+      });
 
       if (profile) {
         await activityLogsApi.create({
@@ -223,6 +231,28 @@ export default function SeoPage() {
         title: 'Success',
         description: 'SEO meta tag created successfully',
       });
+
+      const assignedTo = formData.assigned_to === 'unassigned' ? null : formData.assigned_to;
+      if (assignedTo) {
+        await notificationHelper.notifyAssignment(
+          assignedTo,
+          'SEO Task Assigned',
+          `You have been assigned to SEO meta tags for "${postTitle}".`,
+          'info',
+          'seo_assigned',
+          'seo_meta_tag',
+          ''
+        );
+      } else {
+        await notificationHelper.notifyAdmins(
+          'SEO Meta Tag Created',
+          `New SEO meta tag created for "${postTitle}".`,
+          'success',
+          'seo_created',
+          'seo_meta_tag',
+          ''
+        );
+      }
 
       setIsCreateDialogOpen(false);
       setFormData({
@@ -258,12 +288,17 @@ export default function SeoPage() {
       await seoMetaTagsApi.update(selectedTag.id, {
         title: formData.title,
         keywords: formData.keywords || null,
-
         description: formData.description || null,
         assigned_to: formData.assigned_to === 'unassigned' ? null : formData.assigned_to,
       });
 
-      await updateWpSeoFields();
+      if (selectedTag.post_id && selectedTag.rest_base) {
+        await updateWpSeoFields(selectedTag.post_id, selectedTag.rest_base, {
+          title: formData.title,
+          description: formData.description,
+          keywords: formData.keywords
+        });
+      }
 
       if (profile) {
         await activityLogsApi.create({
@@ -279,6 +314,28 @@ export default function SeoPage() {
         title: 'Success',
         description: 'SEO meta tag updated successfully',
       });
+
+      const assignedToUpdate = formData.assigned_to === 'unassigned' ? null : formData.assigned_to;
+      if (assignedToUpdate) {
+        await notificationHelper.notifyAssignment(
+          assignedToUpdate,
+          'SEO Task Updated',
+          `SEO meta tags for "${selectedTag.page_identifier}" have been updated and assigned to you.`,
+          'info',
+          'seo_assigned',
+          'seo_meta_tag',
+          selectedTag.id
+        );
+      } else {
+        await notificationHelper.notifyAdmins(
+          'SEO Meta Tag Updated',
+          `SEO meta tag for "${selectedTag.page_identifier}" has been updated.`,
+          'success',
+          'seo_updated',
+          'seo_meta_tag',
+          selectedTag.id
+        );
+      }
 
       setIsEditDialogOpen(false);
       setSelectedTag(null);
@@ -321,7 +378,15 @@ export default function SeoPage() {
     if (selectedTags.length === 0) return;
 
     try {
-      await bulkOperations.bulkDelete('seo_meta', selectedTags); // Correct table name used in backend logic usually
+      // Clear WP fields for each selected tag before deleting
+      for (const id of selectedTags) {
+        const tag = tags.find(t => t.id === id);
+        if (tag?.post_id && tag?.rest_base) {
+          await updateWpSeoFields(tag.post_id, tag.rest_base, null);
+        }
+      }
+
+      await bulkOperations.bulkDelete('seo_meta', selectedTags);
 
       if (profile) {
         await activityLogsApi.create({
@@ -372,6 +437,22 @@ export default function SeoPage() {
         description: `Assigned ${selectedTags.length} tags successfully`,
       });
 
+      if (assignedTo) {
+        // Notify the assigned user for each tag
+        for (const tagId of selectedTags) {
+          const tag = tags.find(t => t.id === tagId);
+          await notificationHelper.notifyAssignment(
+            assignedTo,
+            'SEO Task Assigned',
+            `You have been bulk-assigned to SEO meta tags for "${tag?.page_identifier || 'multiple pages'}".`,
+            'info',
+            'seo_assigned',
+            'seo_meta_tag',
+            tagId
+          );
+        }
+      }
+
       setIsBulkAssignDialogOpen(false);
       setSelectedTags([]);
       setBulkAssignUser('unassigned');
@@ -397,6 +478,11 @@ export default function SeoPage() {
     }
 
     try {
+      // Clear WordPress fields
+      if (tag.post_id && tag.rest_base) {
+        await updateWpSeoFields(tag.post_id, tag.rest_base, null);
+      }
+
       await seoMetaTagsApi.delete(tag.id);
 
       if (profile) {
@@ -431,9 +517,8 @@ export default function SeoPage() {
       page_identifier: tag.page_identifier,
       title: tag.title,
       keywords: tag.keywords || '',
-
       description: tag.description || '',
-      assigned_to: tag.assigned_to || 'unassigned',
+      assigned_to: isAdmin ? (tag.assigned_to || 'unassigned') : (profile?.id || 'unassigned'),
     });
     setIsEditDialogOpen(true);
   };
@@ -495,15 +580,9 @@ export default function SeoPage() {
       .catch(() => setPosts([]))
   }, [formDatanew.rest_base, currentSite?.id])
 
-  const usedPostIdsByType = tags.reduce<Record<string, Set<string>>>(
-    (acc, tag) => {
-      const [type, id] = tag.page_identifier.split(":")
-      if (!acc[type]) acc[type] = new Set()
-      acc[type].add(id)
-      return acc
-    },
-    {}
-  )
+  // Build the set from ALL tags (not just role-filtered ones) so that posts already tagged
+  // by any user are excluded from the create-dialog dropdown.
+  const usedPostIds = new Set(allTags.map(tag => tag.post_id).filter(Boolean) as string[])
 
   if (loading) {
     return (
@@ -606,11 +685,7 @@ export default function SeoPage() {
 
                       <SelectContent>
                         {posts
-                          .filter(post => {
-                            const usedIds =
-                              usedPostIdsByType[formDatanew.post_type] || new Set()
-                            return !usedIds.has(post.id.toString())
-                          })
+                          .filter(post => !usedPostIds.has(post.id.toString()))
                           .map(post => (
                             <SelectItem key={post.id} value={post.id.toString()}>
                               {post.title.rendered}
@@ -647,25 +722,16 @@ export default function SeoPage() {
                       placeholder="Page description"
                     />
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="assigned_to">Assigned To</Label>
-                    <Select
-                      value={formData.assigned_to}
-                      onValueChange={(value) => setFormData({ ...formData, assigned_to: value })}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select user" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="unassigned">Unassigned</SelectItem>
-                        {users.map((user) => (
-                          <SelectItem key={user.id} value={user.id}>
-                            {user.username} ({user.role})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  {isAdmin && (
+                    <div className="space-y-2">
+                      <Label htmlFor="assigned_to">Assigned To</Label>
+                      <UserSearchSelect
+                        users={users}
+                        value={formData.assigned_to}
+                        onValueChange={(value) => setFormData({ ...formData, assigned_to: value })}
+                      />
+                    </div>
+                  )}
                 </div>
                 <DialogFooter>
                   <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
@@ -732,36 +798,13 @@ export default function SeoPage() {
                     <TableCell>
                       <div className="flex gap-2">
                         {hasPermission('seo_meta_tags', 'write') && (
-                          <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => openEditDialog(tag)}
-                            >
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                            <AlertDialog>
-                              <AlertDialogTrigger asChild>
-                                <Button variant="ghost" size="sm">
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </AlertDialogTrigger>
-                              <AlertDialogContent>
-                                <AlertDialogHeader>
-                                  <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                                  <AlertDialogDescription>
-                                    This will permanently delete the SEO meta tag for {tag.page_identifier}.
-                                  </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                  <AlertDialogAction onClick={() => handleDelete(tag)}>
-                                    Delete
-                                  </AlertDialogAction>
-                                </AlertDialogFooter>
-                              </AlertDialogContent>
-                            </AlertDialog>
-                          </>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openEditDialog(tag)}
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
                         )}
                       </div>
                     </TableCell>
@@ -807,25 +850,16 @@ export default function SeoPage() {
                 placeholder="Page description"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit-assigned_to">Assigned To</Label>
-              <Select
-                value={formData.assigned_to || 'unassigned'}
-                onValueChange={(value) => setFormData({ ...formData, assigned_to: value })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select user" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="unassigned">Unassigned</SelectItem>
-                  {users.map((user) => (
-                    <SelectItem key={user.id} value={user.id}>
-                      {user.username} ({user.role})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {isAdmin && (
+              <div className="space-y-2">
+                <Label htmlFor="edit-assigned_to">Assigned To</Label>
+                <UserSearchSelect
+                  users={users}
+                  value={formData.assigned_to || 'unassigned'}
+                  onValueChange={(value) => setFormData({ ...formData, assigned_to: value })}
+                />
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
@@ -847,19 +881,11 @@ export default function SeoPage() {
           <div className="space-y-4">
             <div className="space-y-2">
               <Label>Select User</Label>
-              <Select value={bulkAssignUser} onValueChange={setBulkAssignUser}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select user" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="unassigned">Unassigned</SelectItem>
-                  {users.map((user) => (
-                    <SelectItem key={user.id} value={user.id}>
-                      {user.username} ({user.role})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <UserSearchSelect
+                users={users}
+                value={bulkAssignUser}
+                onValueChange={setBulkAssignUser}
+              />
             </div>
           </div>
           <DialogFooter>

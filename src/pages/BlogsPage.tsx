@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { UserSearchSelect } from '@/components/common/UserSearchSelect';
 import { useNavigate } from 'react-router-dom';
 import { activityLogsApi, profilesApi, bulkOperations } from '@/db/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -168,7 +169,11 @@ export default function BlogsPage() {
     assigned_to: 'unassigned',
   });
 
-  const { profile } = useAuth();
+  const { profile, hasPermission } = useAuth();
+  const isAdmin = profile?.role === 'super_admin' || profile?.role === 'admin';
+  // Roles that are explicitly allowed to delete blogs (regardless of DB permission overrides)
+  const canDeleteBlog = hasPermission('blogs', 'write') ||
+    ['super_admin', 'admin', 'seo_manager', 'seo_person'].includes(profile?.role || '');
   const { toast } = useToast();
   const navigate = useNavigate();
   const wordpressApi = useWordPressApi();
@@ -448,7 +453,7 @@ export default function BlogsPage() {
         ...(formData.category_id && { categories: [formData.category_id] }),
 
         ...(formData.tag_ids.length > 0 && { tags: formData.tag_ids }),
-        assigned_to: formData.assigned_to === 'unassigned' ? (profile?.id || null) : formData.assigned_to,
+        assigned_to: formData.assigned_to === 'unassigned' ? null : formData.assigned_to,
       };
 
       let savedPost;
@@ -478,15 +483,28 @@ export default function BlogsPage() {
           description: 'Blog created successfully in WordPress',
         });
 
-        await notificationHelper.notifyUserAndAdmins(
-          profile.id as string,
-          'Blog Created',
-          `New blog "${formData.title}" has been created.`,
-          'success',
-          'blog_created',
-          'blog',
-          String(savedPost.id)
-        );
+        const assignedTo = formData.assigned_to === 'unassigned' ? null : formData.assigned_to;
+
+        if (assignedTo) {
+          await notificationHelper.notifyAssignment(
+            assignedTo,
+            'Blog Created',
+            `New blog "${formData.title}" has been created and assigned to you.`,
+            'success',
+            'blog_created',
+            'blog',
+            String(savedPost.id)
+          );
+        } else {
+          await notificationHelper.notifyAdmins(
+            'Blog Created',
+            `New blog "${formData.title}" has been created.`,
+            'success',
+            'blog_created',
+            'blog',
+            String(savedPost.id)
+          );
+        }
 
         if (profile) {
           await activityLogsApi.create({
@@ -651,6 +669,7 @@ export default function BlogsPage() {
     setFormData({
       title: '',
       description: '',
+
       content: '',
       feature_image: '',
       feature_image_id: null,
@@ -660,7 +679,7 @@ export default function BlogsPage() {
       tag_ids: [],
 
       status: 'draft',
-      assigned_to: 'unassigned',
+      assigned_to: !isAdmin && profile?.id ? profile.id : 'unassigned',
     });
   };
 
@@ -710,12 +729,20 @@ export default function BlogsPage() {
   };
   // added filtering logic for blogs based on status and category
 
+  // Team member filter: only show their own blogs
+  const teamRoles = ['sales_person', 'seo_person', 'client'];
+  const isTeamMember = profile && teamRoles.includes(profile.role);
+
   // Filter blogs
   // Normalize status for filtering (WordPress statuses: draft, private, pending, future, publish)
   const filteredBlogs = blogs.filter(blog => {
-    const matchesStatus =
-      statusFilter === 'all' ||
-      blog.status === statusFilter;
+    // Team members only see blogs assigned to them or authored by them
+    if (isTeamMember && profile) {
+      const isAssigned = blog.assigned_to === profile.id;
+      const isAuthor = blog.author_id === profile.id;
+      if (!isAssigned && !isAuthor) return false;
+    }
+    const matchesStatus = statusFilter === 'all' || blog.status === statusFilter;
     const matchesCategory = categoryFilter === 'all' || blog.category === categoryFilter;
     return matchesStatus && matchesCategory;
   });
@@ -751,10 +778,12 @@ export default function BlogsPage() {
                 <UserPlus className="mr-2 h-4 w-4" />
                 Assign to User
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleBulkDelete} className="text-destructive">
-                <Trash2 className="mr-2 h-4 w-4" />
-                Delete Selected
-              </DropdownMenuItem>
+              {canDeleteBlog && (
+                <DropdownMenuItem onClick={handleBulkDelete} className="text-destructive">
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete Selected
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         )}
@@ -929,35 +958,37 @@ export default function BlogsPage() {
                                 <Edit className="mr-2 h-4 w-4" />
                                 Edit Blog
                               </DropdownMenuItem>
-                              <AlertDialog>
-                                <AlertDialogTrigger asChild>
-                                  <DropdownMenuItem
-                                    className="text-destructive focus:text-destructive"
-                                    onSelect={(e) => e.preventDefault()}
-                                  >
-                                    <Trash2 className="mr-2 h-4 w-4" />
-                                    Delete Blog
-                                  </DropdownMenuItem>
-                                </AlertDialogTrigger>
-                                <AlertDialogContent>
-                                  <AlertDialogHeader>
-                                    <AlertDialogTitle>Delete Blog?</AlertDialogTitle>
-                                    <AlertDialogDescription>
-                                      This will permanently delete "{blog.title}" from WordPress.
-                                      This action cannot be undone.
-                                    </AlertDialogDescription>
-                                  </AlertDialogHeader>
-                                  <AlertDialogFooter>
-                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                    <AlertDialogAction
-                                      onClick={() => handleDelete(blog.id, blog.title)}
-                                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                              {canDeleteBlog && (
+                                <AlertDialog>
+                                  <AlertDialogTrigger asChild>
+                                    <DropdownMenuItem
+                                      className="text-destructive focus:text-destructive"
+                                      onSelect={(e) => e.preventDefault()}
                                     >
-                                      Delete
-                                    </AlertDialogAction>
-                                  </AlertDialogFooter>
-                                </AlertDialogContent>
-                              </AlertDialog>
+                                      <Trash2 className="mr-2 h-4 w-4" />
+                                      Delete Blog
+                                    </DropdownMenuItem>
+                                  </AlertDialogTrigger>
+                                  <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                      <AlertDialogTitle>Delete Blog?</AlertDialogTitle>
+                                      <AlertDialogDescription>
+                                        This will permanently delete "{blog.title}" from WordPress.
+                                        This action cannot be undone.
+                                      </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                      <AlertDialogAction
+                                        onClick={() => handleDelete(blog.id, blog.title)}
+                                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                      >
+                                        Delete
+                                      </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                  </AlertDialogContent>
+                                </AlertDialog>
+                              )}
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </div>
@@ -1146,6 +1177,19 @@ export default function BlogsPage() {
               </div>
             </div>
 
+            {/* Always show Assigned To; non-admins see it pre-filled with their own name, disabled */}
+            <div>
+              <Label htmlFor="assigned_to">Assigned To</Label>
+              <div className="mt-1">
+                <UserSearchSelect
+                  users={users}
+                  value={formData.assigned_to}
+                  onValueChange={(value) => setFormData({ ...formData, assigned_to: value })}
+                  disabled={saving || !isAdmin}
+                />
+              </div>
+            </div>
+
             <div>
               <Label className="mb-1 block">Tags</Label>
               <Popover>
@@ -1313,19 +1357,11 @@ export default function BlogsPage() {
           <div className="space-y-4">
             <div className="space-y-2">
               <Label>Select User</Label>
-              <Select value={bulkAssignUser} onValueChange={setBulkAssignUser}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select user" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="unassigned">Unassigned</SelectItem>
-                  {users.map((user) => (
-                    <SelectItem key={user.id} value={user.id}>
-                      {user.username} ({user.role})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <UserSearchSelect
+                users={users}
+                value={bulkAssignUser}
+                onValueChange={setBulkAssignUser}
+              />
             </div>
           </div>
           <DialogFooter>
