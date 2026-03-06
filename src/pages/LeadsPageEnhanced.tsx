@@ -62,6 +62,7 @@ import {
   Facebook,
   Linkedin,
   Trash2,
+  Loader2,
 } from 'lucide-react';
 import {
   AlertDialog,
@@ -127,6 +128,7 @@ export default function LeadsPageEnhanced() {
   // Dialogs
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showBulkEditDialog, setShowBulkEditDialog] = useState(false);
+  const [isBulkEditing, setIsBulkEditing] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showFollowUpDialog, setShowFollowUpDialog] = useState(false);
   const [selectedLeadForFollowUp, setSelectedLeadForFollowUp] = useState<string | null>(null);
@@ -381,6 +383,7 @@ export default function LeadsPageEnhanced() {
   const handleBulkEdit = async () => {
     if (selectedLeads.length === 0) return;
 
+    setIsBulkEditing(true);
     try {
       const updates: Record<string, unknown> = {};
       if (bulkEditData.status) updates.status = bulkEditData.status;
@@ -406,6 +409,8 @@ export default function LeadsPageEnhanced() {
         description: 'Failed to update leads',
         variant: 'destructive',
       });
+    } finally {
+      setIsBulkEditing(false);
     }
   };
 
@@ -1081,10 +1086,19 @@ export default function LeadsPageEnhanced() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowBulkEditDialog(false)}>
+            <Button variant="outline" onClick={() => setShowBulkEditDialog(false)} disabled={isBulkEditing}>
               Cancel
             </Button>
-            <Button onClick={handleBulkEdit}>Update Leads</Button>
+            <Button onClick={handleBulkEdit} disabled={isBulkEditing}>
+              {isBulkEditing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Updating...
+                </>
+              ) : (
+                'Update Leads'
+              )}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
