@@ -139,6 +139,8 @@ export default function BlogsPage() {
   const [users, setUsers] = useState<Profile[]>([]);
   const [isBulkAssignDialogOpen, setIsBulkAssignDialogOpen] = useState(false);
   const [bulkAssignUser, setBulkAssignUser] = useState<string>('unassigned');
+  const [isBulkAssigning, setIsBulkAssigning] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
   // Categories and Tags
   const [categories, setCategories] = useState<WPCategory[]>([]);
@@ -591,8 +593,8 @@ export default function BlogsPage() {
   const handleBulkDelete = async () => {
     if (selectedBlogs.length === 0) return;
 
+    setIsBulkDeleting(true);
     try {
-      // Note: wordpressApi bulk delete might not exist, implementing loop
       for (const id of selectedBlogs) {
         await wordpressApi.deletePost(Number(id), true);
       }
@@ -621,12 +623,15 @@ export default function BlogsPage() {
         description: 'Failed to delete selected blogs',
         variant: 'destructive',
       });
+    } finally {
+      setIsBulkDeleting(false);
     }
   };
 
   const handleBulkAssign = async () => {
     if (selectedBlogs.length === 0) return;
 
+    setIsBulkAssigning(true);
     try {
       const assignedTo = bulkAssignUser === 'unassigned' ? null : bulkAssignUser;
       blogAssignmentsApi.bulkSet(selectedBlogs, assignedTo);
@@ -657,6 +662,8 @@ export default function BlogsPage() {
         description: 'Failed to assign selected blogs',
         variant: 'destructive',
       });
+    } finally {
+      setIsBulkAssigning(false);
     }
   };
 
@@ -772,17 +779,24 @@ export default function BlogsPage() {
           {selectedBlogs.length > 0 && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline">
-                  Bulk Actions ({selectedBlogs.length})
+                <Button variant="outline" disabled={isBulkDeleting || isBulkAssigning}>
+                  {isBulkDeleting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Deleting...
+                    </>
+                  ) : (
+                    `Bulk Actions (${selectedBlogs.length})`
+                  )}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent>
-                <DropdownMenuItem onClick={() => setIsBulkAssignDialogOpen(true)}>
+                <DropdownMenuItem onClick={() => setIsBulkAssignDialogOpen(true)} disabled={isBulkDeleting}>
                   <UserPlus className="mr-2 h-4 w-4" />
                   Assign to User
                 </DropdownMenuItem>
                 {canDeleteBlog && (
-                  <DropdownMenuItem onClick={handleBulkDelete} className="text-destructive">
+                  <DropdownMenuItem onClick={handleBulkDelete} className="text-destructive" disabled={isBulkDeleting}>
                     <Trash2 className="mr-2 h-4 w-4" />
                     Delete Selected
                   </DropdownMenuItem>
@@ -1369,10 +1383,19 @@ export default function BlogsPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsBulkAssignDialogOpen(false)}>
+            <Button variant="outline" onClick={() => setIsBulkAssignDialogOpen(false)} disabled={isBulkAssigning}>
               Cancel
             </Button>
-            <Button onClick={handleBulkAssign}>Assign</Button>
+            <Button onClick={handleBulkAssign} disabled={isBulkAssigning}>
+              {isBulkAssigning ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Assigning...
+                </>
+              ) : (
+                'Assign'
+              )}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
