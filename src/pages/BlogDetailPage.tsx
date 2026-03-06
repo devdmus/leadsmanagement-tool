@@ -397,31 +397,31 @@ export default function BlogDetailPage() {
                     </Button>
 
                     {canDeleteBlog && (
-                      <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                              <Button variant="destructive">
-                                  <Trash2 className="h-4 w-4 mr-2" />
-                                  Delete Blog
-                              </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                              <AlertDialogHeader>
-                                  <AlertDialogTitle>Delete Blog?</AlertDialogTitle>
-                                  <AlertDialogDescription>
-                                      This will permanently delete "{blog.title}" from WordPress. This action cannot be undone.
-                                  </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                  <AlertDialogAction
-                                      onClick={handleDelete}
-                                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                                  >
-                                      Delete
-                                  </AlertDialogAction>
-                              </AlertDialogFooter>
-                          </AlertDialogContent>
-                      </AlertDialog>
+                        <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                                <Button variant="destructive">
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    Delete Blog
+                                </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                                <AlertDialogHeader>
+                                    <AlertDialogTitle>Delete Blog?</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                        This will permanently delete "{blog.title}" from WordPress. This action cannot be undone.
+                                    </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction
+                                        onClick={handleDelete}
+                                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                    >
+                                        Delete
+                                    </AlertDialogAction>
+                                </AlertDialogFooter>
+                            </AlertDialogContent>
+                        </AlertDialog>
                     )}
                 </div>
             </div>
@@ -490,7 +490,7 @@ export default function BlogDetailPage() {
                     </div>
 
                     {/* Category + Assigned To — side by side */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-0">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-2">
                             <Label htmlFor="category">Category</Label>
                             <Select
@@ -524,7 +524,7 @@ export default function BlogDetailPage() {
                     </div>
 
                     {/* Status + Tags — side by side */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-0">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-2">
                             <Label htmlFor="status">Status</Label>
                             <Select
@@ -656,7 +656,7 @@ export default function BlogDetailPage() {
             {/* Full Content Card */}
             <Card>
                 <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
+                    <CardTitle className="flex items-center gap-2 ">
                         <FileText className="h-5 w-5" />
                         Full Content
                     </CardTitle>
