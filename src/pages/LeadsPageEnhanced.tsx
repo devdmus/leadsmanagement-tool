@@ -723,7 +723,7 @@ export default function LeadsPageEnhanced() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="flex flex-col md:flex-row items-end md:items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold">Leads Management</h1>
           <p className="text-muted-foreground">Manage and track your marketing leads</p>
@@ -1027,7 +1027,7 @@ export default function LeadsPageEnhanced() {
                 </SelectContent>
               </Select>
             </div>
-            <div>
+            <div className='space-y-2'>
               <Label htmlFor="assigned_to">Assign To</Label>
               <UserSearchSelect
                 users={users}

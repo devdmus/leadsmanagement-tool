@@ -394,8 +394,9 @@ export function createWordPressApi(wpBaseUrl: string, authHeader: Record<string,
       }
     },
 
-    async getActivityLogs(page: number = 1, customHeaders?: Record<string, string>) {
-      const url = `${WP_JSON_BASE}/crm/v1/logs?page=${page}`;
+    async getActivityLogs(page: number = 1, limit: number = 20, customHeaders?: Record<string, string>): Promise<{ logs: any[]; total: number; page: number; perPage: number }> {
+      const url = `${WP_JSON_BASE}/crm/v1/logs?page=${page}&limit=${limit}`;
+      console.log('🔍 WordPress API - getActivityLogs called:', { page, limit, url });
       const res = await fetch(url, {
         headers: customHeaders || AUTH_HEADER,
       });
@@ -410,7 +411,14 @@ export function createWordPressApi(wpBaseUrl: string, authHeader: Record<string,
         if (res.status === 403) throw new Error('You do not have permission to view logs');
         throw new Error(`Failed to fetch logs: ${res.status} ${res.statusText}`);
       }
-      return res.json();
+      const data = await res.json();
+      // Handle both new paginated shape { logs, total, page, perPage } and legacy plain array
+      if (Array.isArray(data)) {
+        console.log('✅ WordPress API Response (legacy array):', { count: data.length });
+        return { logs: data, total: data.length, page, perPage: limit };
+      }
+      console.log('✅ WordPress API Response - getActivityLogs:', { page, limit, returnedCount: data.logs?.length, total: data.total });
+      return data as { logs: any[]; total: number; page: number; perPage: number };
     },
 
     // ── IP Whitelist (crm/v1) ─────────────────────────────

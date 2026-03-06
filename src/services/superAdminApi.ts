@@ -162,7 +162,7 @@ export const superAdminApi = {
     }
   },
 
-  async getActivityLogs(token: string, page = 1): Promise<{
+  async getActivityLogs(token: string, page = 1, limit = 20): Promise<{
     logs: Array<{
       id: number;
       admin_id: number;
@@ -176,7 +176,7 @@ export const superAdminApi = {
     page: number;
     perPage: number;
   }> {
-    const res = await fetch(`${API_BASE}/activity-logs?page=${page}`, {
+    const res = await fetch(`${API_BASE}/activity-logs?page=${page}&limit=${limit}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) throw new Error('Failed to fetch super admin activity logs');

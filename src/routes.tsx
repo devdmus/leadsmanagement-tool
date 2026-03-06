@@ -14,6 +14,7 @@ import UserProfilePage from './pages/UserProfilePage';
 import ProfilePage from './pages/ProfilePage';
 import PermissionsPage from './pages/PermissionsPage';
 import ActivityPage from './pages/ActivityPage';
+import ActivityDetailPage from './pages/ActivityDetailPage';
 import SubscriptionPage from './pages/SubscriptionPage';
 import type { ReactNode } from 'react';
 
@@ -89,6 +90,11 @@ const routes: RouteConfig[] = [
     name: 'Activity Logs',
     path: '/activity',
     element: <ActivityPage />
+  },
+  {
+    name: 'Activity Detail',
+    path: '/activity/:id',
+    element: <ActivityDetailPage />
   },
   {
     name: 'Subscription',

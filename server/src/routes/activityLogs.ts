@@ -42,7 +42,7 @@ router.post('/', requireSuperAdmin, async (req: AuthRequest, res) => {
 router.get('/', requireSuperAdmin, async (req: AuthRequest, res) => {
     try {
         const page = Math.max(1, parseInt((req.query.page as string) || '1', 10));
-        const perPage = 50;
+        const perPage = Math.min(100, Math.max(1, parseInt((req.query.limit as string) || '20', 10)));
         const offset = (page - 1) * perPage;
 
         const [rows] = await pool.execute(
