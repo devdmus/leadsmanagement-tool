@@ -80,6 +80,10 @@ export default function LeadDetailPage() {
   const { profile, hasPermission } = useAuth();
   const { toast } = useToast();
 
+  // Only these roles can delete leads or reassign them
+  const canDeleteLead = ['super_admin', 'admin', 'seo_manager'].includes(profile?.role || '');
+  const canAssignLead = ['super_admin', 'admin', 'seo_manager'].includes(profile?.role || '');
+
   const [lead, setLead] = useState<LeadWithAssignee | null>(null);
   const [users, setUsers] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -522,7 +526,7 @@ export default function LeadDetailPage() {
           <ArrowLeft className="h-4 w-4 mr-2" />
           Back to Leads
         </Button>
-        {hasPermission('leads', 'write') && (
+        {canDeleteLead && (
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button variant="destructive">
@@ -607,7 +611,7 @@ export default function LeadDetailPage() {
                 users={users}
                 value={lead.assigned_to || 'unassigned'}
                 onValueChange={(value) => handleUpdateLead('assigned_to', value)}
-                disabled={!hasPermission('leads', 'write')}
+                disabled={!canAssignLead}
               />
             </div>
 

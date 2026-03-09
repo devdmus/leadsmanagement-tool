@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { UserSearchSelect } from '@/components/common/UserSearchSelect';
 import { useNavigate } from 'react-router-dom';
-import { activityLogsApi, profilesApi, bulkOperations } from '@/db/api';
+import { activityLogsApi, profilesApi, bulkOperations, blogAssignmentsApi } from '@/db/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { notificationHelper } from '@/lib/notificationHelper';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -139,6 +139,8 @@ export default function BlogsPage() {
   const [users, setUsers] = useState<Profile[]>([]);
   const [isBulkAssignDialogOpen, setIsBulkAssignDialogOpen] = useState(false);
   const [bulkAssignUser, setBulkAssignUser] = useState<string>('unassigned');
+  const [isBulkAssigning, setIsBulkAssigning] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
   // Categories and Tags
   const [categories, setCategories] = useState<WPCategory[]>([]);
@@ -170,10 +172,9 @@ export default function BlogsPage() {
   });
 
   const { profile, hasPermission } = useAuth();
-  const isAdmin = profile?.role === 'super_admin' || profile?.role === 'admin';
-  // Roles that are explicitly allowed to delete blogs (regardless of DB permission overrides)
-  const canDeleteBlog = hasPermission('blogs', 'write') ||
-    ['super_admin', 'admin', 'seo_manager', 'seo_person'].includes(profile?.role || '');
+  const isAdmin = profile?.role === 'super_admin' || profile?.role === 'admin' || profile?.role === 'seo_manager';
+  // Only these roles can delete blogs — role list is the sole gatekeeper
+  const canDeleteBlog = ['super_admin', 'admin', 'seo_manager'].includes(profile?.role || '');
   const { toast } = useToast();
   const navigate = useNavigate();
   const wordpressApi = useWordPressApi();
@@ -256,8 +257,16 @@ export default function BlogsPage() {
   const loadBlogs = async () => {
     try {
       setLoading(true);
-      const wpPosts = await wordpressApi.getAllPosts();
-      const mappedBlogs = wpPosts.map(mapWpPostToBlog);
+      const [wpPosts, assignments] = await Promise.all([
+        wordpressApi.getAllPosts(),
+        blogAssignmentsApi.getAll(),
+      ]);
+      const mappedBlogs = wpPosts.map((post: any) => {
+        const blog = mapWpPostToBlog(post);
+        // Prefer WP server value; fall back to localStorage cache
+        blog.assigned_to = blog.assigned_to ?? assignments[blog.id] ?? null;
+        return blog;
+      });
       setBlogs(mappedBlogs);
     } catch (error) {
       console.error('Failed to load blogs:', error);
@@ -460,6 +469,7 @@ export default function BlogsPage() {
 
       if (editingBlog) {
         savedPost = await wordpressApi.updatePost(Number(editingBlog.id), postData);
+        blogAssignmentsApi.set(editingBlog.id, formData.assigned_to === 'unassigned' ? null : formData.assigned_to);
 
         toast({
           title: 'Success',
@@ -477,6 +487,7 @@ export default function BlogsPage() {
         }
       } else {
         savedPost = await wordpressApi.createPost(postData);
+        blogAssignmentsApi.set(String(savedPost.id), formData.assigned_to === 'unassigned' ? null : formData.assigned_to);
 
         toast({
           title: 'Success',
@@ -582,8 +593,8 @@ export default function BlogsPage() {
   const handleBulkDelete = async () => {
     if (selectedBlogs.length === 0) return;
 
+    setIsBulkDeleting(true);
     try {
-      // Note: wordpressApi bulk delete might not exist, implementing loop
       for (const id of selectedBlogs) {
         await wordpressApi.deletePost(Number(id), true);
       }
@@ -612,22 +623,18 @@ export default function BlogsPage() {
         description: 'Failed to delete selected blogs',
         variant: 'destructive',
       });
+    } finally {
+      setIsBulkDeleting(false);
     }
   };
 
   const handleBulkAssign = async () => {
     if (selectedBlogs.length === 0) return;
 
+    setIsBulkAssigning(true);
     try {
       const assignedTo = bulkAssignUser === 'unassigned' ? null : bulkAssignUser;
-
-      // Since we can't easily add custom fields to WP API without plugin support, 
-      // we will just fake it in local storage or assume it works if supported.
-      // For now, let's update local 'crm_blogs' if it was using local mock, 
-      // but since this page uses wordpressApi, we might need to store assignment locally
-      // or update a specific meta field if configured.
-      // As per previous instruction, we will use bulkOperations to simulate
-      await bulkOperations.bulkUpdate('blogs', selectedBlogs, { assigned_to: assignedTo });
+      blogAssignmentsApi.bulkSet(selectedBlogs, assignedTo);
 
       if (profile) {
         await activityLogsApi.create({
@@ -655,6 +662,8 @@ export default function BlogsPage() {
         description: 'Failed to assign selected blogs',
         variant: 'destructive',
       });
+    } finally {
+      setIsBulkAssigning(false);
     }
   };
 
@@ -770,17 +779,24 @@ export default function BlogsPage() {
           {selectedBlogs.length > 0 && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline">
-                  Bulk Actions ({selectedBlogs.length})
+                <Button variant="outline" disabled={isBulkDeleting || isBulkAssigning}>
+                  {isBulkDeleting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Deleting...
+                    </>
+                  ) : (
+                    `Bulk Actions (${selectedBlogs.length})`
+                  )}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent>
-                <DropdownMenuItem onClick={() => setIsBulkAssignDialogOpen(true)}>
+                <DropdownMenuItem onClick={() => setIsBulkAssignDialogOpen(true)} disabled={isBulkDeleting}>
                   <UserPlus className="mr-2 h-4 w-4" />
                   Assign to User
                 </DropdownMenuItem>
                 {canDeleteBlog && (
-                  <DropdownMenuItem onClick={handleBulkDelete} className="text-destructive">
+                  <DropdownMenuItem onClick={handleBulkDelete} className="text-destructive" disabled={isBulkDeleting}>
                     <Trash2 className="mr-2 h-4 w-4" />
                     Delete Selected
                   </DropdownMenuItem>
@@ -1367,10 +1383,19 @@ export default function BlogsPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsBulkAssignDialogOpen(false)}>
+            <Button variant="outline" onClick={() => setIsBulkAssignDialogOpen(false)} disabled={isBulkAssigning}>
               Cancel
             </Button>
-            <Button onClick={handleBulkAssign}>Assign</Button>
+            <Button onClick={handleBulkAssign} disabled={isBulkAssigning}>
+              {isBulkAssigning ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Assigning...
+                </>
+              ) : (
+                'Assign'
+              )}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

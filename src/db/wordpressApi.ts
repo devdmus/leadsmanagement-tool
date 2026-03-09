@@ -109,7 +109,7 @@ export function createWordPressApi(wpBaseUrl: string, authHeader: Record<string,
     async getAllPosts() {
       // Try fetching all statuses (requires authentication with edit_posts capability)
       const res = await fetch(
-        `${WP_BASE_URL}/posts?_embed&per_page=100&status=publish,draft,private,pending,future&orderby=date&order=desc`,
+        `${WP_BASE_URL}/posts?_embed&per_page=100&status=publish,draft,private,pending,future&orderby=date&order=desc&_=${Date.now()}`,
         { headers: AUTH_HEADER }
       );
 
@@ -121,7 +121,7 @@ export function createWordPressApi(wpBaseUrl: string, authHeader: Record<string,
       if (res.status === 400 || res.status === 401 || res.status === 403) {
         console.warn('Cannot fetch all post statuses (auth insufficient), falling back to published posts only');
         const fallbackRes = await fetch(
-          `${WP_BASE_URL}/posts?_embed&per_page=100&status=publish&orderby=date&order=desc`,
+          `${WP_BASE_URL}/posts?_embed&per_page=100&status=publish&orderby=date&order=desc&_=${Date.now()}`,
           { headers: AUTH_HEADER }
         );
         if (fallbackRes.ok) {
@@ -140,7 +140,7 @@ export function createWordPressApi(wpBaseUrl: string, authHeader: Record<string,
     },
 
     async getPost(id: number) {
-      const res = await fetch(`${WP_BASE_URL}/posts/${id}?_embed`, {
+      const res = await fetch(`${WP_BASE_URL}/posts/${id}?_embed&_=${Date.now()}`, {
         headers: AUTH_HEADER,
       });
       if (!res.ok) throw new Error('Failed to fetch post');

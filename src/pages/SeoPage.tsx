@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { UserSearchSelect } from '@/components/common/UserSearchSelect';
-import { seoMetaTagsApi, activityLogsApi, profilesApi, bulkOperations } from '@/db/api';
+import { seoMetaTagsApi, activityLogsApi, profilesApi } from '@/db/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWordPressApi } from '@/hooks/useWordPressApi';
 import { useSite } from '@/contexts/SiteContext';
@@ -36,7 +36,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, Edit, UserPlus } from 'lucide-react';
+import { Plus, Edit, UserPlus, Loader2, Trash2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -74,9 +74,12 @@ export default function SeoPage() {
   const [users, setUsers] = useState<Profile[]>([]);
   const [isBulkAssignDialogOpen, setIsBulkAssignDialogOpen] = useState(false);
   const [bulkAssignUser, setBulkAssignUser] = useState<string>('unassigned');
+  const [saving, setSaving] = useState(false);
+  const [isBulkAssigning, setIsBulkAssigning] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
   const { profile, hasPermission, getWpAuthHeader } = useAuth();
-  const isAdmin = profile?.role === 'super_admin' || profile?.role === 'admin';
+  const isAdmin = profile?.role === 'super_admin' || profile?.role === 'admin' || profile?.role === 'seo_manager';
   const { toast } = useToast();
   const wordpressApi = useWordPressApi();
   const { currentSite } = useSite();
@@ -197,6 +200,7 @@ export default function SeoPage() {
       return;
     }
 
+    setSaving(true);
     try {
       const selectedPost = posts.find(p => p.id.toString() === formDatanew.post_id);
       const postTitle = selectedPost?.title?.rendered || `${formDatanew.post_type}:${formDatanew.post_id}`;
@@ -271,6 +275,8 @@ export default function SeoPage() {
         description: 'Failed to create SEO meta tag',
         variant: 'destructive',
       });
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -284,6 +290,7 @@ export default function SeoPage() {
       return;
     }
 
+    setSaving(true);
     try {
       await seoMetaTagsApi.update(selectedTag.id, {
         title: formData.title,
@@ -355,6 +362,8 @@ export default function SeoPage() {
         description: 'Failed to update SEO meta tag',
         variant: 'destructive',
       });
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -377,16 +386,15 @@ export default function SeoPage() {
   const handleBulkDelete = async () => {
     if (selectedTags.length === 0) return;
 
+    setIsBulkDeleting(true);
     try {
-      // Clear WP fields for each selected tag before deleting
       for (const id of selectedTags) {
         const tag = tags.find(t => t.id === id);
         if (tag?.post_id && tag?.rest_base) {
           await updateWpSeoFields(tag.post_id, tag.rest_base, null);
         }
+        await seoMetaTagsApi.delete(id);
       }
-
-      await bulkOperations.bulkDelete('seo_meta', selectedTags);
 
       if (profile) {
         await activityLogsApi.create({
@@ -412,15 +420,21 @@ export default function SeoPage() {
         description: 'Failed to delete selected tags',
         variant: 'destructive',
       });
+    } finally {
+      setIsBulkDeleting(false);
     }
   };
 
   const handleBulkAssign = async () => {
     if (selectedTags.length === 0) return;
 
+    setIsBulkAssigning(true);
     try {
       const assignedTo = bulkAssignUser === 'unassigned' ? null : bulkAssignUser;
-      await bulkOperations.bulkUpdate('seo_meta', selectedTags, { assigned_to: assignedTo });
+
+      for (const id of selectedTags) {
+        await seoMetaTagsApi.update(id, { assigned_to: assignedTo });
+      }
 
       if (profile) {
         await activityLogsApi.create({
@@ -438,7 +452,6 @@ export default function SeoPage() {
       });
 
       if (assignedTo) {
-        // Notify the assigned user for each tag
         for (const tagId of selectedTags) {
           const tag = tags.find(t => t.id === tagId);
           await notificationHelper.notifyAssignment(
@@ -464,6 +477,8 @@ export default function SeoPage() {
         description: 'Failed to assign selected tags',
         variant: 'destructive',
       });
+    } finally {
+      setIsBulkAssigning(false);
     }
   };
 
@@ -611,16 +626,23 @@ export default function SeoPage() {
           {selectedTags.length > 0 && hasPermission('seo_meta_tags', 'write') && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline">
-                  Bulk Actions ({selectedTags.length})
+                <Button variant="outline" disabled={isBulkDeleting || isBulkAssigning}>
+                  {isBulkDeleting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Deleting...
+                    </>
+                  ) : (
+                    `Bulk Actions (${selectedTags.length})`
+                  )}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent>
-                <DropdownMenuItem onClick={() => setIsBulkAssignDialogOpen(true)}>
+                <DropdownMenuItem onClick={() => setIsBulkAssignDialogOpen(true)} disabled={isBulkDeleting}>
                   <UserPlus className="mr-2 h-4 w-4" />
                   Assign to User
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleBulkDelete} className="text-destructive">
+                <DropdownMenuItem onClick={handleBulkDelete} className="text-destructive" disabled={isBulkDeleting}>
                   <Trash2 className="mr-2 h-4 w-4" />
                   Delete Selected
                 </DropdownMenuItem>
@@ -734,10 +756,19 @@ export default function SeoPage() {
                   )}
                 </div>
                 <DialogFooter>
-                  <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+                  <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)} disabled={saving}>
                     Cancel
                   </Button>
-                  <Button onClick={handleCreate}>Create</Button>
+                  <Button onClick={handleCreate} disabled={saving}>
+                    {saving ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Creating...
+                      </>
+                    ) : (
+                      'Create'
+                    )}
+                  </Button>
                 </DialogFooter>
               </DialogContent>
             </Dialog>
@@ -862,10 +893,19 @@ export default function SeoPage() {
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)} disabled={saving}>
               Cancel
             </Button>
-            <Button onClick={handleUpdate}>Update</Button>
+            <Button onClick={handleUpdate} disabled={saving}>
+              {saving ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Updating...
+                </>
+              ) : (
+                'Update'
+              )}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -889,10 +929,19 @@ export default function SeoPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsBulkAssignDialogOpen(false)}>
+            <Button variant="outline" onClick={() => setIsBulkAssignDialogOpen(false)} disabled={isBulkAssigning}>
               Cancel
             </Button>
-            <Button onClick={handleBulkAssign}>Assign</Button>
+            <Button onClick={handleBulkAssign} disabled={isBulkAssigning}>
+              {isBulkAssigning ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Assigning...
+                </>
+              ) : (
+                'Assign'
+              )}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
