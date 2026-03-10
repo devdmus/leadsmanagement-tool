@@ -27,7 +27,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { ArrowLeft, Mail, Phone, Calendar, Trash2, Edit, Plus, Clock, CheckCircle, Loader2 } from 'lucide-react';
+import { ArrowLeft, Mail, Phone, Calendar, Trash2, Edit, Plus, Clock, CheckCircle, Loader2, Check, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -79,6 +79,7 @@ export default function LeadDetailPage() {
   // Only these roles can delete leads or reassign them
   const canDeleteLead = ['super_admin', 'admin', 'seo_manager'].includes(profile?.role || '');
   const canAssignLead = ['super_admin', 'admin', 'seo_manager'].includes(profile?.role || '');
+  const canEditContactInfo = ['super_admin', 'admin', 'lead_manager'].includes(profile?.role || '');
 
   const [lead, setLead] = useState<LeadWithAssignee | null>(null);
   const [users, setUsers] = useState<Profile[]>([]);
@@ -102,6 +103,17 @@ export default function LeadDetailPage() {
 
   const [isSavingNote, setIsSavingNote] = useState(false);
   const [isSavingFollowUp, setIsSavingFollowUp] = useState(false);
+
+  // States for inline editing
+  const [isEditingEmail, setIsEditingEmail] = useState(false);
+  const [emailInput, setEmailInput] = useState('');
+
+  const [isEditingPhone, setIsEditingPhone] = useState(false);
+  const [phoneInput, setPhoneInput] = useState('');
+
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState('');
+
 
   useEffect(() => {
     if (id) {
@@ -193,7 +205,7 @@ export default function LeadDetailPage() {
                 id
               );
             } else {
-              await notificationHelper.notifyAdmins(
+              await notificationHelper.notifySalesAdmins(
                 'Lead Updated',
                 `Lead "${lead?.name}" ${field} has been updated.`,
                 'success',
@@ -379,7 +391,7 @@ export default function LeadDetailPage() {
           details: { lead_name: lead?.name },
         });
 
-        await notificationHelper.notifyAdmins(
+        await notificationHelper.notifySalesAdmins(
           'Lead Deleted',
           `Lead "${lead?.name}" has been deleted by ${profile.username}.`,
           'warning',
@@ -477,7 +489,53 @@ export default function LeadDetailPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-2xl">{lead.name}</CardTitle>
+          <div className="flex items-center gap-2">
+            {isEditingName ? (
+              <div className="flex items-center gap-2">
+                <Input
+                  value={nameInput}
+                  onChange={(e) => setNameInput(e.target.value)}
+                  className="h-9 text-2xl font-bold w-64"
+                />
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
+                  onClick={async () => {
+                    await handleUpdateLead('name', nameInput);
+                    setIsEditingName(false);
+                  }}
+                >
+                  <Check className="h-4 w-4" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                  onClick={() => setIsEditingName(false)}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 group">
+                <CardTitle className="text-2xl">{lead.name}</CardTitle>
+                {canEditContactInfo && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                    onClick={() => {
+                      setNameInput(lead.name || '');
+                      setIsEditingName(true);
+                    }}
+                  >
+                    <Edit className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
           <CardDescription>Lead Details</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -486,7 +544,51 @@ export default function LeadDetailPage() {
               <Label>Email</Label>
               <div className="flex items-center gap-2 text-sm">
                 <Mail className="h-4 w-4 text-muted-foreground" />
-                <span>{lead.email}</span>
+                {isEditingEmail ? (
+                  <div className="flex items-center gap-2 w-full max-w-sm">
+                    <Input
+                      value={emailInput}
+                      onChange={(e) => setEmailInput(e.target.value)}
+                      className="h-8"
+                    />
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
+                      onClick={async () => {
+                        await handleUpdateLead('email', emailInput);
+                        setIsEditingEmail(false);
+                      }}
+                    >
+                      <Check className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                      onClick={() => setIsEditingEmail(false)}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 group h-8">
+                    <span>{lead.email}</span>
+                    {canEditContactInfo && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={() => {
+                          setEmailInput(lead.email || '');
+                          setIsEditingEmail(true);
+                        }}
+                      >
+                        <Edit className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -494,7 +596,51 @@ export default function LeadDetailPage() {
               <Label>Phone</Label>
               <div className="flex items-center gap-2 text-sm">
                 <Phone className="h-4 w-4 text-muted-foreground" />
-                <span>{lead.phone || 'N/A'}</span>
+                {isEditingPhone ? (
+                  <div className="flex items-center gap-2 w-full max-w-sm">
+                    <Input
+                      value={phoneInput}
+                      onChange={(e) => setPhoneInput(e.target.value)}
+                      className="h-8"
+                    />
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
+                      onClick={async () => {
+                        await handleUpdateLead('phone', phoneInput);
+                        setIsEditingPhone(false);
+                      }}
+                    >
+                      <Check className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                      onClick={() => setIsEditingPhone(false)}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 group h-8">
+                    <span>{lead.phone || 'N/A'}</span>
+                    {canEditContactInfo && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={() => {
+                          setPhoneInput(lead.phone || '');
+                          setIsEditingPhone(true);
+                        }}
+                      >
+                        <Edit className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 

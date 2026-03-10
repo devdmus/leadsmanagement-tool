@@ -245,10 +245,11 @@ export default function SeoPage() {
           'info',
           'seo_assigned',
           'seo_meta_tag',
-          ''
+          '',
+          'seo_department'
         );
       } else {
-        await notificationHelper.notifyAdmins(
+        await notificationHelper.notifySeoAdmins(
           'SEO Meta Tag Created',
           `New SEO meta tag created for "${postTitle}".`,
           'success',
@@ -331,10 +332,11 @@ export default function SeoPage() {
           'info',
           'seo_assigned',
           'seo_meta_tag',
-          selectedTag.id
+          selectedTag.id,
+          'seo_department'
         );
       } else {
-        await notificationHelper.notifyAdmins(
+        await notificationHelper.notifySeoAdmins(
           'SEO Meta Tag Updated',
           `SEO meta tag for "${selectedTag.page_identifier}" has been updated.`,
           'success',
@@ -461,7 +463,8 @@ export default function SeoPage() {
             'info',
             'seo_assigned',
             'seo_meta_tag',
-            tagId
+            tagId,
+            'seo_department'
           );
         }
       }

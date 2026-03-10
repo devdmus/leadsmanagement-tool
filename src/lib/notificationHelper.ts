@@ -58,10 +58,7 @@ export const notificationHelper = {
     }
   },
 
-  // Notify a specific user AND all admins (useful for assignments).
-  // This sets user_id for the user and role_target='admin' for the admins.
-  notifyAssignment: async (
-    userId: string,
+  notifySalesAdmins: async (
     title: string,
     message: string,
     type: 'success' | 'error' | 'info' | 'warning',
@@ -71,8 +68,58 @@ export const notificationHelper = {
   ) => {
     try {
       await notificationsApi.create({
+        role_target: 'sales_department',
+        title,
+        message,
+        type,
+        action_type: actionType,
+        resource_type: resourceType,
+        resource_id: resourceId,
+      });
+    } catch (error) {
+      console.error('Failed to notify sales admins:', error);
+    }
+  },
+
+  notifySeoAdmins: async (
+    title: string,
+    message: string,
+    type: 'success' | 'error' | 'info' | 'warning',
+    actionType: string,
+    resourceType?: string,
+    resourceId?: string
+  ) => {
+    try {
+      await notificationsApi.create({
+        role_target: 'seo_department',
+        title,
+        message,
+        type,
+        action_type: actionType,
+        resource_type: resourceType,
+        resource_id: resourceId,
+      });
+    } catch (error) {
+      console.error('Failed to notify seo admins:', error);
+    }
+  },
+
+  // Notify a specific user AND all admins (useful for assignments).
+  // This sets user_id for the user and role_target='admin' for the admins.
+  notifyAssignment: async (
+    userId: string,
+    title: string,
+    message: string,
+    type: 'success' | 'error' | 'info' | 'warning',
+    actionType: string,
+    resourceType?: string,
+    resourceId?: string,
+    roleTarget: string = 'sales_department'
+  ) => {
+    try {
+      await notificationsApi.create({
         user_id: notificationHelper.namespaceId(userId, 'wp'),
-        role_target: 'admin', // Ensures admins also see it
+        role_target: roleTarget, // Ensures admins and department manager also see it
         title,
         message,
         type,
