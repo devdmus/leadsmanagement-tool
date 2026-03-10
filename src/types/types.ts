@@ -3,10 +3,10 @@ export type LeadSource = 'facebook' | 'linkedin' | 'form' | 'seo' | (string & {}
 export type LeadStatus = 'pending' | 'completed' | 'remainder';
 
 export type FeatureName =
+  | 'dashboard'
   | 'leads'
   | 'users'
   | 'activity_logs'
-  | 'subscriptions'
   | 'seo_meta_tags'
   | 'blogs'
   | 'sites'

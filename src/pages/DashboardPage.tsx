@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { wpLeadsApi } from '@/db/wpLeadsApi';
 import { followUpsApi } from '@/db/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Users, UserRoundCheck, TriangleAlert, BellRing, Clock } from 'lucide-react';
+import { Users, UserRoundCheck, TriangleAlert, BellRing, Clock, ShieldOff } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useSite } from '@/contexts/SiteContext';
 import { Badge } from '@/components/ui/badge';
@@ -17,7 +17,7 @@ const COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3
 
 export default function DashboardPage() {
   const { currentSite } = useSite();
-  const { profile, userType } = useAuth();
+  const { profile, userType, hasPermission } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -46,9 +46,17 @@ export default function DashboardPage() {
     }
   };
 
+  // Roles that see ALL leads (no filter)
+  const isFullAccessRole = ['super_admin', 'admin', 'lead_manager'].includes(profile?.role ?? '');
+
   const loadStats = async () => {
     try {
-      const data = await wpLeadsApi.getAll();
+      const allData = await wpLeadsApi.getAll();
+
+      // Sales persons / restricted roles only see their own assigned leads
+      const data = isFullAccessRole
+        ? allData
+        : allData.filter((l: any) => l.assigned_to?.toString() === profile?.id?.toString());
 
       const stats = {
         total: data.length,
@@ -92,6 +100,16 @@ export default function DashboardPage() {
     { name: 'Reminder', value: stats.remainder },
   ] : [];
 
+  if (!hasPermission('dashboard', 'read')) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px] space-y-3">
+        <ShieldOff className="h-12 w-12 text-muted-foreground" />
+        <p className="text-lg font-medium text-muted-foreground">Access Restricted</p>
+        <p className="text-sm text-muted-foreground">You don't have permission to view the dashboard.</p>
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -121,7 +139,9 @@ export default function DashboardPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Dashboard</h1>
-          <p className="text-muted-foreground">Overview of your marketing leads</p>
+          <p className="text-muted-foreground">
+            {isFullAccessRole ? 'Overview of your marketing leads' : 'Overview of your assigned leads'}
+          </p>
         </div>
         {/* Send Test Alert — super_admin only */}
         {profile?.role === 'super_admin' && (
@@ -159,7 +179,7 @@ export default function DashboardPage() {
           <CardContent>
             <div className="text-2xl font-bold text-[#ff0000]">{stats?.total || 0}</div>
             <p className="text-sm text-muted-foreground mt-1">
-              All leads from all sources
+              {isFullAccessRole ? 'All leads from all sources' : 'Leads assigned to you'}
             </p>
           </CardContent>
         </Card>

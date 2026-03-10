@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { wpLeadsApi } from '@/db/wpLeadsApi';
 import { bulkOperations, csvHelper } from '@/db/helpers';
-import { profilesApi, activityLogsApi, followUpsApi } from '@/db/api';
+import { profilesApi, activityLogsApi } from '@/db/api';
 import { socialIntegration } from '@/services/socialIntegration';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSite } from '@/contexts/SiteContext';
@@ -58,7 +58,6 @@ import {
   Edit,
   MoreVertical,
   Search,
-  Calendar,
   Facebook,
   Linkedin,
   Trash2,
@@ -73,7 +72,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
 import { UserSearchSelect } from '@/components/common/UserSearchSelect';
@@ -130,8 +128,10 @@ export default function LeadsPageEnhanced() {
   const [showBulkEditDialog, setShowBulkEditDialog] = useState(false);
   const [isBulkEditing, setIsBulkEditing] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
-  const [showFollowUpDialog, setShowFollowUpDialog] = useState(false);
-  const [selectedLeadForFollowUp, setSelectedLeadForFollowUp] = useState<string | null>(null);
+
+  const [formErrors, setFormErrors] = useState({ name: '', email: '', phone: '' });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [leadToDelete, setLeadToDelete] = useState<string | null>(null);
 
   const [newLead, setNewLead] = useState({
     name: '',
@@ -147,13 +147,10 @@ export default function LeadsPageEnhanced() {
     assigned_to: '',
   });
 
-  const [followUpData, setFollowUpData] = useState({
-    follow_up_date: '',
-    notes: '',
-    type: 'call',
-  });
 
   const [importFile, setImportFile] = useState<File | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importSummary, setImportSummary] = useState<{ total: number; success: number; failed: number; errors: string[] } | null>(null);
   const [syncing, setSyncing] = useState(false);
 
   // Social Integration Inputs
@@ -336,6 +333,72 @@ export default function LeadsPageEnhanced() {
       return;
     }
 
+    const errors = { name: '', email: '', phone: '' };
+    let hasError = false;
+
+    if (!newLead.name.trim()) {
+      errors.name = 'Name is required';
+      hasError = true;
+    }
+
+    if (!newLead.email.trim()) {
+      errors.email = 'Email is required';
+      hasError = true;
+    } else {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(newLead.email)) {
+        errors.email = 'Please enter a valid email address';
+        hasError = true;
+      }
+    }
+
+    if (!newLead.phone?.trim()) {
+      errors.phone = 'Phone number is required';
+      hasError = true;
+    } else {
+      const phone = newLead.phone.trim();
+
+      // Only allow an optional leading + followed by digits only (no spaces, dashes, (), _, /, @, #, ! etc.)
+      if (!/^\+?[0-9]+$/.test(phone)) {
+        errors.phone = 'Phone number can only contain digits and an optional leading +';
+        hasError = true;
+      } else if ((phone.match(/\+/g) || []).length > 1) {
+        // Reject multiple + signs (e.g. ++91, +1+91)
+        errors.phone = 'Phone number must have at most one + symbol at the start';
+        hasError = true;
+      } else {
+        const digits = phone.replace(/^\+/, '');
+
+        if (digits.length < 10) {
+          errors.phone = 'Phone number must be at least 10 digits';
+          hasError = true;
+        } else if (digits.length > 13) {
+          errors.phone = 'Phone number must not exceed 13 digits';
+          hasError = true;
+        } else if (/^0+$/.test(digits)) {
+          // Reject all-zeros
+          errors.phone = 'Please enter a valid phone number';
+          hasError = true;
+        } else if (!phone.startsWith('+') && digits.length === 10 && !/^[6-9]/.test(digits)) {
+          // For 10-digit domestic numbers, enforce Indian mobile start digit (6-9)
+          errors.phone = 'Invalid phone number. Indian mobile numbers must start with 6, 7, 8, or 9';
+          hasError = true;
+        } else if (phone.startsWith('+') && /^\+0/.test(phone)) {
+          // Country code cannot start with 0
+          errors.phone = 'Country code cannot start with 0';
+          hasError = true;
+        }
+      }
+    }
+
+    if (hasError) {
+      setFormErrors(errors);
+      return;
+    }
+
+    setIsSubmitting(true);
+    setFormErrors({ name: '', email: '', phone: '' });
+
     try {
       const leadData = {
         ...newLead,
@@ -377,6 +440,8 @@ export default function LeadsPageEnhanced() {
         description: 'Failed to create lead',
         variant: 'destructive',
       });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -424,6 +489,10 @@ export default function LeadsPageEnhanced() {
       return;
     }
 
+    // Optimistically remove from UI immediately
+    setLeads(prev => prev.filter(l => l.id !== leadId));
+    setSelectedLeads(prev => prev.filter(id => id !== leadId));
+
     try {
       await wpLeadsApi.delete(leadId);
 
@@ -450,6 +519,8 @@ export default function LeadsPageEnhanced() {
         description: 'Failed to delete lead',
         variant: 'destructive',
       });
+      // Reload to restore the lead if deletion failed
+      loadLeads();
     }
   };
 
@@ -475,38 +546,103 @@ export default function LeadsPageEnhanced() {
   const handleImport = async () => {
     if (!importFile) return;
 
+    setIsImporting(true);
+    setImportSummary(null);
+
     try {
       const text = await importFile.text();
       const data = csvHelper.parseCSV(text);
 
-      for (const row of data) {
-        const leadData = {
-          name: row.name || '',
-          email: row.email || '',
-          phone: row.phone || null,
-          source: (row.source as LeadSource) || 'form',
-          status: (row.status as LeadStatus) || 'pending',
-          assigned_to: null,
-        };
+      let successCount = 0;
+      let failedCount = 0;
+      const errors: string[] = [];
 
-        await wpLeadsApi.create(leadData);
+      for (let i = 0; i < data.length; i++) {
+        const row = data[i];
+        try {
+          // Validation similar to handleCreateLead
+          if (!row.name || !row.name.trim()) {
+            throw new Error('Name is required');
+          }
+          if (!row.email || !row.email.trim()) {
+            throw new Error('Email is required');
+          } else {
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(row.email)) {
+              throw new Error(`Invalid email format`);
+            }
+          }
+          if (row.phone && row.phone.trim()) {
+            const phone = row.phone.trim();
+            if (!/^\+?[0-9]+$/.test(phone)) throw new Error('Phone can only contain digits and an optional leading +');
+            if ((phone.match(/\+/g) || []).length > 1) throw new Error('Phone has multiple + symbols');
+
+            const digits = phone.replace(/^\+/, '');
+            if (digits.length < 10) throw new Error('Phone is too short (min 10 digits)');
+            if (digits.length > 13) throw new Error('Phone is too long (max 13 digits)');
+            if (/^0+$/.test(digits)) throw new Error('Phone number is invalid (all zeros)');
+          }
+
+          const leadData = {
+            name: row.name.trim(),
+            email: row.email.trim(),
+            phone: row.phone ? row.phone.trim() : null,
+            source: (row.source as LeadSource) || 'form',
+            status: (row.status as LeadStatus) || 'pending',
+            assigned_to: null,
+          };
+
+          await wpLeadsApi.create(leadData);
+          successCount++;
+        } catch (err: any) {
+          failedCount++;
+          const reason = err.message || 'Unknown error';
+          errors.push(`Row ${i + 1} (${row.email || 'No Email'}): ${reason}`);
+        }
       }
 
-      toast({
-        title: 'Success',
-        description: `Imported ${data.length} leads`,
+      setImportSummary({
+        total: data.length,
+        success: successCount,
+        failed: failedCount,
+        errors
       });
 
-      setShowImportDialog(false);
-      setImportFile(null);
+      if (failedCount === 0) {
+        toast({
+          title: 'Success',
+          description: `Imported ${successCount} leads successfully`,
+        });
+        // Auto-close on perfect success
+        setTimeout(() => {
+          setShowImportDialog(false);
+          setImportFile(null);
+          setImportSummary(null);
+        }, 2000);
+      } else if (successCount > 0) {
+        toast({
+          title: 'Partial Success',
+          description: `Imported ${successCount} leads, but ${failedCount} failed`,
+          variant: 'destructive',
+        });
+      } else {
+        toast({
+          title: 'Error',
+          description: `All ${failedCount} rows failed to import`,
+          variant: 'destructive'
+        });
+      }
+
       loadLeads();
     } catch (error) {
-      console.error('Failed to import:', error);
+      console.error('Failed to parse import:', error);
       toast({
         title: 'Error',
-        description: 'Failed to import leads',
+        description: 'Failed to read or parse the CSV file',
         variant: 'destructive',
       });
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -622,48 +758,6 @@ export default function LeadsPageEnhanced() {
     }
   };
 
-  const handleCreateFollowUp = async () => {
-    if (!selectedLeadForFollowUp || !profile) return;
-
-    if (!followUpData.follow_up_date) {
-      toast({
-        title: 'Valid Date Required',
-        description: 'Please select a date and time for the follow-up.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    try {
-      await followUpsApi.create({
-        lead_id: selectedLeadForFollowUp,
-        user_id: profile.id as string,
-        follow_up_date: followUpData.follow_up_date,
-        notes: followUpData.notes,
-        type: followUpData.type,
-      });
-
-      // Update lead status to 'remainder' (Reminder)
-      await wpLeadsApi.update(selectedLeadForFollowUp, { status: 'remainder' });
-
-      toast({
-        title: 'Success',
-        description: 'Follow-up scheduled & Lead status updated to Remainder',
-      });
-
-      setShowFollowUpDialog(false);
-      setSelectedLeadForFollowUp(null);
-      setFollowUpData({ follow_up_date: '', notes: '', type: 'call' });
-      loadLeads();
-    } catch (error) {
-      console.error('Failed to create follow-up:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to schedule follow-up',
-        variant: 'destructive',
-      });
-    }
-  };
 
   const getStatusBadge = (status: LeadStatus) => {
     const variants = {
@@ -896,46 +990,14 @@ export default function LeadsPageEnhanced() {
                                   <Eye className="h-4 w-4 mr-2" />
                                   View Details
                                 </DropdownMenuItem>
-                                {hasPermission('leads', 'write') && (
-                                  <DropdownMenuItem
-                                    onClick={() => {
-                                      setSelectedLeadForFollowUp(lead.id);
-                                      setShowFollowUpDialog(true);
-                                    }}
-                                  >
-                                    <Calendar className="h-4 w-4 mr-2" />
-                                    Schedule Follow-up
-                                  </DropdownMenuItem>
-                                )}
                                 {canDeleteLead && (
-                                  <AlertDialog>
-                                    <AlertDialogTrigger asChild>
-                                      <DropdownMenuItem
-                                        className="text-destructive focus:text-destructive"
-                                        onSelect={(e) => e.preventDefault()}
-                                      >
-                                        <Trash2 className="h-4 w-4 mr-2" />
-                                        Delete Lead
-                                      </DropdownMenuItem>
-                                    </AlertDialogTrigger>
-                                    <AlertDialogContent>
-                                      <AlertDialogHeader>
-                                        <AlertDialogTitle>Delete Lead?</AlertDialogTitle>
-                                        <AlertDialogDescription>
-                                          This will permanently delete "{lead.name}". This action cannot be undone.
-                                        </AlertDialogDescription>
-                                      </AlertDialogHeader>
-                                      <AlertDialogFooter>
-                                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                        <AlertDialogAction
-                                          onClick={() => handleDeleteLead(lead.id)}
-                                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                                        >
-                                          Delete
-                                        </AlertDialogAction>
-                                      </AlertDialogFooter>
-                                    </AlertDialogContent>
-                                  </AlertDialog>
+                                  <DropdownMenuItem
+                                    className="text-destructive focus:text-destructive"
+                                    onClick={() => setLeadToDelete(lead.id)}
+                                  >
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    Delete Lead
+                                  </DropdownMenuItem>
                                 )}
                               </DropdownMenuContent>
                             </DropdownMenu>
@@ -976,9 +1038,14 @@ export default function LeadsPageEnhanced() {
               <Input
                 id="name"
                 value={newLead.name}
-                onChange={(e) => setNewLead({ ...newLead, name: e.target.value })}
+                onChange={(e) => {
+                  setNewLead({ ...newLead, name: e.target.value });
+                  if (formErrors.name) setFormErrors({ ...formErrors, name: '' });
+                }}
                 placeholder="John Doe"
+                className={formErrors.name ? "border-destructive" : ""}
               />
+              {formErrors.name && <p className="text-sm text-destructive mt-1">{formErrors.name}</p>}
             </div>
             <div>
               <Label htmlFor="email">Email *</Label>
@@ -986,18 +1053,28 @@ export default function LeadsPageEnhanced() {
                 id="email"
                 type="email"
                 value={newLead.email}
-                onChange={(e) => setNewLead({ ...newLead, email: e.target.value })}
+                onChange={(e) => {
+                  setNewLead({ ...newLead, email: e.target.value });
+                  if (formErrors.email) setFormErrors({ ...formErrors, email: '' });
+                }}
                 placeholder="john@example.com"
+                className={formErrors.email ? "border-destructive" : ""}
               />
+              {formErrors.email && <p className="text-sm text-destructive mt-1">{formErrors.email}</p>}
             </div>
             <div>
-              <Label htmlFor="phone">Phone</Label>
+              <Label htmlFor="phone">Phone *</Label>
               <Input
                 id="phone"
                 value={newLead.phone}
-                onChange={(e) => setNewLead({ ...newLead, phone: e.target.value })}
+                onChange={(e) => {
+                  setNewLead({ ...newLead, phone: e.target.value });
+                  if (formErrors.phone) setFormErrors({ ...formErrors, phone: '' });
+                }}
                 placeholder="+1-555-0123"
+                className={formErrors.phone ? "border-destructive" : ""}
               />
+              {formErrors.phone && <p className="text-sm text-destructive mt-1">{formErrors.phone}</p>}
             </div>
             <div>
               <Label htmlFor="source">Source</Label>
@@ -1042,10 +1119,16 @@ export default function LeadsPageEnhanced() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
+            <Button variant="outline" onClick={() => {
+              setShowCreateDialog(false);
+              setFormErrors({ name: '', email: '', phone: '' });
+            }} disabled={isSubmitting}>
               Cancel
             </Button>
-            <Button onClick={handleCreateLead}>Create Lead</Button>
+            <Button onClick={handleCreateLead} disabled={isSubmitting}>
+              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {isSubmitting ? 'Creating...' : 'Create Lead'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1133,7 +1216,10 @@ export default function LeadsPageEnhanced() {
                     type="file"
                     accept=".csv"
                     className="hidden"
-                    onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+                    onChange={(e) => {
+                      setImportFile(e.target.files?.[0] || null);
+                      setImportSummary(null); // Reset summary on new file
+                    }}
                   />
                   {importFile && (
                     <p className="text-sm text-primary font-medium mt-2">
@@ -1141,16 +1227,43 @@ export default function LeadsPageEnhanced() {
                     </p>
                   )}
                 </div>
-                <p className="text-xs text-muted-foreground text-center">
-                  Required columns: name, email, phone, source, status
-                </p>
+                {!importSummary && (
+                  <p className="text-xs text-muted-foreground text-center">
+                    Required columns: name, email, phone, source, status
+                  </p>
+                )}
+
+                {importSummary && (
+                  <div className="rounded-md bg-muted p-4 mt-4 space-y-2 text-sm">
+                    <p className="font-semibold text-foreground">Import Summary</p>
+                    <p>Total Processed: {importSummary.total}</p>
+                    <p className="text-green-600">Successfully Imported: {importSummary.success}</p>
+                    <p className="text-red-500">Failed: {importSummary.failed}</p>
+
+                    {importSummary.errors.length > 0 && (
+                      <div className="mt-2 pt-2 border-t border-border">
+                        <p className="font-semibold text-red-500 mb-1">Errors:</p>
+                        <ul className="list-disc pl-4 space-y-1 text-xs text-muted-foreground max-h-32 overflow-y-auto custom-scrollbar">
+                          {importSummary.errors.map((err, i) => (
+                            <li key={i} className="text-red-500/90">{err}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="flex justify-end space-x-2">
-                <Button variant="outline" onClick={() => setShowImportDialog(false)}>
+                <Button variant="outline" onClick={() => {
+                  setShowImportDialog(false);
+                  setImportSummary(null);
+                  setImportFile(null);
+                }} disabled={isImporting}>
                   Cancel
                 </Button>
-                <Button onClick={handleImport} disabled={!importFile}>
-                  Import File
+                <Button onClick={handleImport} disabled={!importFile || isImporting}>
+                  {isImporting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {isImporting ? 'Importing...' : 'Import File'}
                 </Button>
               </div>
             </TabsContent>
@@ -1272,62 +1385,33 @@ export default function LeadsPageEnhanced() {
         </DialogContent>
       </Dialog>
 
-      {/* Follow-up Dialog */}
-      <Dialog open={showFollowUpDialog} onOpenChange={setShowFollowUpDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Schedule Follow-up</DialogTitle>
-            <DialogDescription>
-              Set a reminder to follow up with this lead
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="follow_up_date">Follow-up Date & Time</Label>
-              <Input
-                id="follow_up_date"
-                type="datetime-local"
-                value={followUpData.follow_up_date}
-                onChange={(e) => setFollowUpData({ ...followUpData, follow_up_date: e.target.value })}
-              />
-            </div>
-            <div>
-              <Label htmlFor="follow_up_type">Interaction Type</Label>
-              <Select
-                value={followUpData.type}
-                onValueChange={(value) => setFollowUpData({ ...followUpData, type: value })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="call">Call</SelectItem>
-                  <SelectItem value="email">Email</SelectItem>
-                  <SelectItem value="meeting">Meeting</SelectItem>
-                  <SelectItem value="whatsapp">WhatsApp</SelectItem>
-                  <SelectItem value="linkedin">LinkedIn Message</SelectItem>
-                  <SelectItem value="other">Other</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="follow_up_notes">Notes</Label>
-              <Input
-                id="follow_up_notes"
-                value={followUpData.notes}
-                onChange={(e) => setFollowUpData({ ...followUpData, notes: e.target.value })}
-                placeholder="Add notes for this follow-up"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowFollowUpDialog(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleCreateFollowUp}>Schedule Reminder</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Delete Lead Confirmation */}
+      <AlertDialog open={leadToDelete !== null} onOpenChange={(open) => { if (!open) setLeadToDelete(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Lead?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete{' '}
+              <strong>"{leads.find(l => l.id === leadToDelete)?.name ?? 'this lead'}"</strong>.
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setLeadToDelete(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (leadToDelete) {
+                  handleDeleteLead(leadToDelete);
+                  setLeadToDelete(null);
+                }
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
