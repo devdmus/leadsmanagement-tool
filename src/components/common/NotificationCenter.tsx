@@ -45,15 +45,54 @@ export function NotificationCenter() {
     try {
       if (!profile) return;
 
-      const userId = userType === 'super_admin' ? profile.id.toString() : profile.id;
+      const prefix = userType === 'super_admin' ? 'sa_' : 'wp_';
+      const userId = `${prefix}${profile.id}`;
       const isSuperAdmin = userType === 'super_admin';
 
       const data = await import('@/db/api').then(m => m.notificationsApi.getAll(
         userId,
         currentSite?.id,
         isSuperAdmin,
-        userType || '' // Pass string to avoid lint error
+        profile?.role || '' // Pass correct role instead of generic wp_user
       ));
+
+      // Trigger follow-up alerts
+      try {
+        const { followUpsApi } = await import('@/db/api');
+        const { notificationHelper } = await import('@/lib/notificationHelper');
+        const dueFollowups = await followUpsApi.getDue(currentSite?.id);
+
+        let newNotifsCreated = false;
+        for (const fu of dueFollowups) {
+          if (!fu.notified) {
+            await notificationHelper.notifyUser(
+              profile.id.toString(),
+              'Follow-up Reminder',
+              `A follow-up is due for Lead #${fu.lead_id} at ${new Date(fu.follow_up_date).toLocaleString()}.`,
+              'warning',
+              'follow_up_due',
+              'lead',
+              fu.lead_id,
+              userType === 'super_admin' ? 'sa' : 'wp'
+            );
+            await followUpsApi.update(fu.lead_id, fu.id, { notified: true } as any);
+            newNotifsCreated = true;
+          }
+        }
+
+        // If we just generated push notifications for followups, reload the data to fetch them instantly.
+        if (newNotifsCreated) {
+          const newData = await import('@/db/api').then(m => m.notificationsApi.getAll(
+            userId,
+            currentSite?.id,
+            isSuperAdmin,
+            profile?.role || ''
+          ));
+          data.splice(0, data.length, ...newData);
+        }
+      } catch (e) {
+        console.error('Failed to notify followups', e);
+      }
 
       const normalizedData = (data || []).map((n: any) => ({
         ...n,
@@ -102,7 +141,7 @@ export function NotificationCenter() {
     try {
       const userId = getUserId();
       const isSuperAdmin = getIsSuperAdmin();
-      await import('@/db/api').then(m => (m.notificationsApi as any).markAllAsRead(userId, isSuperAdmin));
+      await import('@/db/api').then(m => (m.notificationsApi as any).markAllAsRead(userId, isSuperAdmin, profile?.role || ''));
       setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
       setUnreadCount(0);
     } catch (error) {
@@ -115,7 +154,7 @@ export function NotificationCenter() {
     try {
       const userId = getUserId();
       const isSuperAdmin = getIsSuperAdmin();
-      await import('@/db/api').then(m => (m.notificationsApi as any).clearAll(userId, isSuperAdmin, userType));
+      await import('@/db/api').then(m => (m.notificationsApi as any).clearAll(userId, isSuperAdmin, profile?.role || ''));
       // Remove all from local state immediately
       setNotifications([]);
       setUnreadCount(0);
