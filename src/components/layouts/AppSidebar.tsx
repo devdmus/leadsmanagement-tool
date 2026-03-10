@@ -29,13 +29,13 @@ import {
 } from "@/components/ui/tooltip"
 
 const navigation = [
-  { name: 'Dashboard', href: '/', icon: LayoutDashboard, roles: ['super_admin', 'admin', 'lead_manager', 'sales_person', 'seo_manager', 'seo_person', 'client'] as UserRole[] },
+  { name: 'Dashboard', href: '/', icon: LayoutDashboard, roles: ['super_admin', 'admin', 'lead_manager', 'sales_person', 'seo_manager', 'seo_person', 'client'] as UserRole[], permissionKey: 'dashboard' },
   { name: 'Leads', href: '/leads', icon: Users, roles: ['super_admin', 'admin', 'lead_manager', 'sales_person', 'client'] as UserRole[], permissionKey: 'leads' },
   { name: 'SEO Meta Tags', href: '/seo', icon: Search, roles: ['super_admin', 'admin', 'seo_manager', 'seo_person'] as UserRole[], permissionKey: 'seo_meta_tags' },
   { name: 'Blogs', href: '/blogs', icon: BookOpen, roles: ['super_admin', 'admin', 'seo_manager', 'seo_person'] as UserRole[], permissionKey: 'blogs' },
   { name: 'Sites', href: '/sites', icon: Globe, roles: ['super_admin', 'admin'] as UserRole[], permissionKey: 'sites' },
   { name: 'IP Security', href: '/ip-security', icon: Shield, roles: ['super_admin'] as UserRole[], permissionKey: 'ip_security' },
-  { name: 'Subscription', href: '/subscription', icon: FileText, roles: ['client'] as UserRole[], permissionKey: 'subscriptions' },
+  { name: 'Subscription', href: '/subscription', icon: FileText, roles: ['client'] as UserRole[] },
   { name: 'User Management', href: '/users', icon: Settings, roles: ['super_admin', 'admin'] as UserRole[], permissionKey: 'users' },
   { name: 'Activity Logs', href: '/activity', icon: FileText, roles: ['super_admin', 'admin', 'lead_manager', 'seo_manager'] as UserRole[], permissionKey: 'activity_logs' },
   { name: 'Permissions', href: '/permissions', icon: Shield, roles: ['super_admin'] as UserRole[], permissionKey: 'permissions' },

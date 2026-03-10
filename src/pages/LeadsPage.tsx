@@ -33,7 +33,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Eye } from 'lucide-react';
+import { Plus, Eye, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -64,6 +64,8 @@ export default function LeadsPage() {
   const [filteredLeads, setFilteredLeads] = useState<LeadWithAssignee[]>([]);
   const [loading, setLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [formErrors, setFormErrors] = useState({ name: '', email: '', phone: '' });
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [sourceFilter, setSourceFilter] = useState<string>('all');
 
@@ -160,6 +162,68 @@ export default function LeadsPage() {
       return;
     }
 
+    const errors = { name: '', email: '', phone: '' };
+    let hasError = false;
+
+    if (!newLead.name.trim()) {
+      errors.name = 'Name is required';
+      hasError = true;
+    }
+
+    if (!newLead.email.trim()) {
+      errors.email = 'Email is required';
+      hasError = true;
+    } else {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(newLead.email)) {
+        errors.email = 'Please enter a valid email address';
+        hasError = true;
+      }
+    }
+
+    if (!newLead.phone?.trim()) {
+      errors.phone = 'Phone number is required';
+      hasError = true;
+    } else {
+      const phone = newLead.phone.trim();
+
+      // Only allow an optional leading + followed by digits only
+      if (!/^\+?[0-9]+$/.test(phone)) {
+        errors.phone = 'Phone number can only contain digits and an optional leading +';
+        hasError = true;
+      } else if ((phone.match(/\+/g) || []).length > 1) {
+        errors.phone = 'Phone number must have at most one + symbol at the start';
+        hasError = true;
+      } else {
+        const digits = phone.replace(/^\+/, '');
+
+        if (digits.length < 10) {
+          errors.phone = 'Phone number must be at least 10 digits';
+          hasError = true;
+        } else if (digits.length > 13) {
+          errors.phone = 'Phone number must not exceed 13 digits';
+          hasError = true;
+        } else if (/^0+$/.test(digits)) {
+          errors.phone = 'Please enter a valid phone number';
+          hasError = true;
+        } else if (!phone.startsWith('+') && digits.length === 10 && !/^[6-9]/.test(digits)) {
+          errors.phone = 'Invalid phone number. Indian mobile numbers must start with 6, 7, 8, or 9';
+          hasError = true;
+        } else if (phone.startsWith('+') && /^\+0/.test(phone)) {
+          errors.phone = 'Country code cannot start with 0';
+          hasError = true;
+        }
+      }
+    }
+
+    if (hasError) {
+      setFormErrors(errors);
+      return;
+    }
+
+    setIsSubmitting(true);
+    setFormErrors({ name: '', email: '', phone: '' });
+
     try {
       const created = await wpLeadsApi.create({
         ...newLead,
@@ -200,6 +264,8 @@ export default function LeadsPage() {
         description: 'Failed to create lead',
         variant: 'destructive',
       });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -258,28 +324,43 @@ export default function LeadsPage() {
 
               <div className="space-y-4">
                 <div>
-                  <Label>Name</Label>
+                  <Label>Name *</Label>
                   <Input
                     value={newLead.name}
-                    onChange={e => setNewLead({ ...newLead, name: e.target.value })}
+                    onChange={(e) => {
+                      setNewLead({ ...newLead, name: e.target.value });
+                      if (formErrors.name) setFormErrors({ ...formErrors, name: '' });
+                    }}
+                    className={formErrors.name ? "border-destructive" : ""}
                   />
+                  {formErrors.name && <p className="text-sm text-destructive mt-1">{formErrors.name}</p>}
                 </div>
 
                 <div>
-                  <Label>Email</Label>
+                  <Label>Email *</Label>
                   <Input
                     type="email"
                     value={newLead.email}
-                    onChange={e => setNewLead({ ...newLead, email: e.target.value })}
+                    onChange={(e) => {
+                      setNewLead({ ...newLead, email: e.target.value });
+                      if (formErrors.email) setFormErrors({ ...formErrors, email: '' });
+                    }}
+                    className={formErrors.email ? "border-destructive" : ""}
                   />
+                  {formErrors.email && <p className="text-sm text-destructive mt-1">{formErrors.email}</p>}
                 </div>
 
                 <div>
-                  <Label>Phone</Label>
+                  <Label>Phone *</Label>
                   <Input
                     value={newLead.phone}
-                    onChange={e => setNewLead({ ...newLead, phone: e.target.value })}
+                    onChange={(e) => {
+                      setNewLead({ ...newLead, phone: e.target.value });
+                      if (formErrors.phone) setFormErrors({ ...formErrors, phone: '' });
+                    }}
+                    className={formErrors.phone ? "border-destructive" : ""}
                   />
+                  {formErrors.phone && <p className="text-sm text-destructive mt-1">{formErrors.phone}</p>}
                 </div>
 
                 <div>
@@ -302,10 +383,16 @@ export default function LeadsPage() {
               </div>
 
               <DialogFooter>
-                <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
+                <Button variant="outline" onClick={() => {
+                  setIsDialogOpen(false);
+                  setFormErrors({ name: '', email: '', phone: '' });
+                }} disabled={isSubmitting}>
                   Cancel
                 </Button>
-                <Button onClick={handleCreateLead}>Create</Button>
+                <Button onClick={handleCreateLead} disabled={isSubmitting}>
+                  {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {isSubmitting ? 'Creating...' : 'Create'}
+                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>

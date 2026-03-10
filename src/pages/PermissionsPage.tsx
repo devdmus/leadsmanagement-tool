@@ -35,10 +35,10 @@ const CONFIGURABLE_ROLES = [
 ];
 
 const FEATURES = [
+  { key: 'dashboard', label: 'Dashboard' },
   { key: 'leads', label: 'Leads' },
   { key: 'users', label: 'User Management' },
   { key: 'activity_logs', label: 'Activity Logs' },
-  { key: 'subscriptions', label: 'Subscriptions' },
   { key: 'seo_meta_tags', label: 'SEO Meta Tags' },
   { key: 'blogs', label: 'Blogs' },
   { key: 'sites', label: 'Sites' },

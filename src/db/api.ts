@@ -229,105 +229,165 @@ export const activityLogsApi = {
     }
 };
 
-// Notes API
+// Shared helper to get the WP API base + key
+function getWpBase(): { base: string; key: string } | null {
+    const site = getCurrentSiteFromCache();
+    if (!site?.url) return null;
+    let url = site.url.replace(/\/$/, '');
+    if (!url.includes('/wp-json')) url += '/wp-json';
+    return { base: `${url}/crm/v1`, key: (import.meta as any).env?.VITE_WP_API_KEY || 'SECRET123' };
+}
+
+// Notes API — per-lead, multiple notes, stored in crm_lead_notes table
 export const notesApi = {
-    async getByLeadId(leadId: string, _siteId?: string) {
-        const lead = await leadsApi.getById(leadId);
-        return lead.notes ? [{
-            id: 'legacy-note',
-            lead_id: leadId,
-            content: lead.notes,
-            created_at: lead.updated_at || lead.created_at
-        }] : [];
+    async getByLeadId(leadId: string): Promise<any[]> {
+        const wp = getWpBase();
+        if (wp) {
+            try {
+                const res = await fetch(`${wp.base}/leads/${leadId}/notes?api_key=${wp.key}&_=${Date.now()}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    setLS(`crm_notes_${leadId}`, data);
+                    return data;
+                }
+            } catch (e) {
+                console.warn('[notesApi] WP unavailable, using localStorage', e);
+            }
+        }
+        return getLS(`crm_notes_${leadId}`);
     },
-    async create(data: any) {
-        return this.update(data.lead_id, data);
+    async create(leadId: string, data: { content: string; note_type?: string; created_by?: string }): Promise<any> {
+        const wp = getWpBase();
+        if (wp) {
+            try {
+                const res = await fetch(`${wp.base}/leads/${leadId}/notes?api_key=${wp.key}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data),
+                });
+                if (res.ok) return res.json();
+            } catch (e) {
+                console.warn('[notesApi] create failed, using localStorage', e);
+            }
+        }
+        // localStorage fallback
+        const notes = getLS(`crm_notes_${leadId}`);
+        const newNote = { id: genId(), lead_id: leadId, ...data, created_at: new Date().toISOString() };
+        notes.unshift(newNote);
+        setLS(`crm_notes_${leadId}`, notes);
+        return newNote;
     },
-    async update(leadId: string, data: any) {
-        const lead = await leadsApi.update(leadId, { notes: data.content || data.notes });
-        return {
-            id: 'legacy-note',
-            lead_id: leadId,
-            content: lead.notes || data.content,
-            created_at: new Date().toISOString()
-        };
+    async update(leadId: string, noteId: string, data: { content?: string; note_type?: string }): Promise<any> {
+        const wp = getWpBase();
+        if (wp) {
+            try {
+                const res = await fetch(`${wp.base}/leads/${leadId}/notes/${noteId}?api_key=${wp.key}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data),
+                });
+                if (res.ok) return res.json();
+            } catch (e) {
+                console.warn('[notesApi] update failed, using localStorage', e);
+            }
+        }
+        const notes = getLS(`crm_notes_${leadId}`);
+        const idx = notes.findIndex((n: any) => String(n.id) === String(noteId));
+        if (idx > -1) { notes[idx] = { ...notes[idx], ...data }; setLS(`crm_notes_${leadId}`, notes); return notes[idx]; }
+        return { noteId, ...data };
     },
-    async delete(_id: string) {
-        // We can't easily delete just the note via this API without knowing the lead ID
-        // In the new system, deleting a note is just updating it to empty
-        console.warn('Delete note called, please use update with empty content');
+    async delete(leadId: string, noteId: string): Promise<any> {
+        const wp = getWpBase();
+        if (wp) {
+            try {
+                const res = await fetch(`${wp.base}/leads/${leadId}/notes/${noteId}?api_key=${wp.key}`, { method: 'DELETE' });
+                if (res.ok) return res.json();
+            } catch (e) {
+                console.warn('[notesApi] delete failed, using localStorage', e);
+            }
+        }
+        let notes = getLS(`crm_notes_${leadId}`);
+        notes = notes.filter((n: any) => String(n.id) !== String(noteId));
+        setLS(`crm_notes_${leadId}`, notes);
         return { success: true };
     }
 };
 
-// Follow-ups API
+// Follow-ups API — per-lead, MULTIPLE follow-ups, stored in crm_lead_follow_ups table
 export const followUpsApi = {
-    async getAll(_siteId?: string) {
-        const leads = await leadsApi.getAll();
-        return leads
-            .filter((l: any) => l.follow_up_date)
-            .map((l: any) => ({
-                id: `fu-${l.id}`,
-                lead_id: l.id,
-                follow_up_date: l.follow_up_date,
-                status: l.follow_up_status,
-                type: l.follow_up_type,
-                notes: l.notes
-            }));
+    async getByLeadId(leadId: string): Promise<any[]> {
+        const wp = getWpBase();
+        if (wp) {
+            try {
+                const res = await fetch(`${wp.base}/leads/${leadId}/followups?api_key=${wp.key}&_=${Date.now()}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    setLS(`crm_followups_${leadId}`, data);
+                    return data;
+                }
+            } catch (e) {
+                console.warn('[followUpsApi] WP unavailable, using localStorage', e);
+            }
+        }
+        return getLS(`crm_followups_${leadId}`);
     },
-    async getByLead(leadId: string, _siteId?: string) {
-        const lead = await leadsApi.getById(leadId);
-        if (!lead.follow_up_date) return [];
-        return [{
-            id: `fu-${leadId}`,
-            lead_id: leadId,
-            follow_up_date: lead.follow_up_date,
-            status: lead.follow_up_status,
-            type: lead.follow_up_type,
-            notes: lead.notes
-        }];
+    async create(leadId: string, data: { follow_up_date: string; type?: string; status?: string; notes?: string; created_by?: string }): Promise<any> {
+        const wp = getWpBase();
+        if (wp) {
+            try {
+                const res = await fetch(`${wp.base}/leads/${leadId}/followups?api_key=${wp.key}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data),
+                });
+                if (res.ok) return res.json();
+            } catch (e) {
+                console.warn('[followUpsApi] create failed, using localStorage', e);
+            }
+        }
+        const followups = getLS(`crm_followups_${leadId}`);
+        const item = { id: genId(), lead_id: leadId, status: 'pending', type: 'call', ...data, created_at: new Date().toISOString() };
+        followups.push(item);
+        setLS(`crm_followups_${leadId}`, followups);
+        return item;
     },
-    async create(data: any) {
-        await leadsApi.update(data.lead_id, {
-            follow_up_date: data.follow_up_date,
-            follow_up_status: 'pending',
-            follow_up_type: data.type || 'call'
-        });
-        return { id: `fu-${data.lead_id}`, ...data };
+    async update(leadId: string, followUpId: string, data: { follow_up_date?: string; type?: string; status?: string; notes?: string }): Promise<any> {
+        const wp = getWpBase();
+        if (wp) {
+            try {
+                const res = await fetch(`${wp.base}/leads/${leadId}/followups/${followUpId}?api_key=${wp.key}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data),
+                });
+                if (res.ok) return res.json();
+            } catch (e) {
+                console.warn('[followUpsApi] update failed, using localStorage', e);
+            }
+        }
+        const followups = getLS(`crm_followups_${leadId}`);
+        const idx = followups.findIndex((f: any) => String(f.id) === String(followUpId));
+        if (idx > -1) { followups[idx] = { ...followups[idx], ...data }; setLS(`crm_followups_${leadId}`, followups); return followups[idx]; }
+        return { followUpId, ...data };
     },
-    async update(id: string, data: any) {
-        // ID is likely fu-{leadId}
-        const leadId = id.replace('fu-', '');
-        await leadsApi.update(leadId, {
-            follow_up_date: data.follow_up_date,
-            follow_up_status: data.status,
-            follow_up_type: data.type,
-            notes: data.notes
-        });
-        return { id, ...data };
-    },
-    async delete(fuId: string) {
-        const leadId = fuId.replace('fu-', '');
-        await leadsApi.update(leadId, {
-            follow_up_date: null,
-            follow_up_status: 'pending'
-        });
+    async delete(leadId: string, followUpId: string): Promise<any> {
+        const wp = getWpBase();
+        if (wp) {
+            try {
+                const res = await fetch(`${wp.base}/leads/${leadId}/followups/${followUpId}?api_key=${wp.key}`, { method: 'DELETE' });
+                if (res.ok) return res.json();
+            } catch (e) {
+                console.warn('[followUpsApi] delete failed, using localStorage', e);
+            }
+        }
+        let followups = getLS(`crm_followups_${leadId}`);
+        followups = followups.filter((f: any) => String(f.id) !== String(followUpId));
+        setLS(`crm_followups_${leadId}`, followups);
         return { success: true };
     },
-    async getDue(_siteId?: string) {
-        const leads = await leadsApi.getAll();
-        const now = new Date();
-        return leads
-            .filter((l: any) => l.follow_up_date && new Date(l.follow_up_date) <= now && l.follow_up_status === 'pending')
-            .map((l: any) => ({
-                id: `fu-${l.id}`,
-                lead_id: l.id,
-                follow_up_date: l.follow_up_date,
-                status: l.follow_up_status,
-                type: l.follow_up_type,
-                notes: l.notes
-            }));
-    }
+    // Legacy compat - kept so other pages don't break
+    async getAll(_siteId?: string) { return []; },
+    async getByLead(leadId: string) { return this.getByLeadId(leadId); },
 };
 
 // Blog Assignments API — server-side via crm/v1/blog-assignments, localStorage as fallback

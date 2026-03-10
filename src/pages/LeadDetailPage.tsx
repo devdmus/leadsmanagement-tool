@@ -27,7 +27,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { ArrowLeft, Mail, Phone, Calendar, Trash2, Edit, Plus, Clock, CheckCircle } from 'lucide-react';
+import { ArrowLeft, Mail, Phone, Calendar, Trash2, Edit, Plus, Clock, CheckCircle, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -63,13 +63,9 @@ type Lead = {
   description?: string | null;
   created_at: string;
   updated_at: string;
-  notes?: string | null;
-  follow_up_date?: string | null;
-  follow_up_status?: string | null;
-  follow_up_type?: string | null;
 };
 
-// Simplified types for single-field model
+// Simplified types
 type LeadWithAssignee = Lead & {
   assignee?: Profile | null;
 };
@@ -88,6 +84,9 @@ export default function LeadDetailPage() {
   const [users, setUsers] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const [notes, setNotes] = useState<any[]>([]);
+  const [followUps, setFollowUps] = useState<any[]>([]);
+
   const [newNote, setNewNote] = useState('');
   const [noteReason, setNoteReason] = useState('');
   const [noteType, setNoteType] = useState('general');
@@ -101,6 +100,9 @@ export default function LeadDetailPage() {
   const [followUpStatus, setFollowUpStatus] = useState('pending');
   const [followUpType, setFollowUpType] = useState('call');
 
+  const [isSavingNote, setIsSavingNote] = useState(false);
+  const [isSavingFollowUp, setIsSavingFollowUp] = useState(false);
+
   useEffect(() => {
     if (id) {
       loadData();
@@ -111,9 +113,11 @@ export default function LeadDetailPage() {
     if (!id) return;
 
     try {
-      const [leadData, usersData] = await Promise.all([
+      const [leadData, usersData, notesData, followUpsData] = await Promise.all([
         leadsApi.getById(id),
         profilesApi.getAll(),
+        notesApi.getByLeadId(id),
+        followUpsApi.getByLeadId(id),
       ]);
 
       if (!leadData) {
@@ -127,7 +131,10 @@ export default function LeadDetailPage() {
         ...leadData,
         assignee: allUsers.find(u => u.id === assignedToId) || (assignedToId ? { id: assignedToId, username: `User ${assignedToId}`, role: 'unknown' } : null)
       } as LeadWithAssignee);
+
       setUsers(allUsers);
+      setNotes(notesData || []);
+      setFollowUps(followUpsData || []);
     } catch (error) {
       console.error('Failed to load lead details:', error);
       toast({
@@ -216,39 +223,27 @@ export default function LeadDetailPage() {
   const handleSaveNote = async () => {
     if (!id || !profile || !newNote.trim()) return;
 
+    setIsSavingNote(true);
     try {
-      // In the new system, we just update the lead's notes column
-      await notesApi.update(id, {
-        content: newNote,
-        reason: noteReason || null,
-        note_type: noteType,
-      });
-
-      await notificationHelper.notifyUserAndAdmins(
-        profile.id as string,
-        'Lead Note Updated',
-        `Note on lead "${lead?.name}" has been updated.`,
-        'success',
-        'note_updated',
-        'lead',
-        id
-      );
-
-      toast({
-        title: 'Success',
-        description: 'Note updated successfully',
-      });
-
-      if (profile) {
-        await activityLogsApi.create({
-          user_id: profile.id as string,
-          action: 'update_note',
-          resource_type: 'note',
-          resource_id: id,
-          details: { content: newNote },
+      if (editingNote?.id && editingNote.id !== 'dummy') {
+        await notesApi.update(id, editingNote.id, {
+          content: newNote,
+          note_type: noteType,
+        });
+      } else {
+        await notesApi.create(id, {
+          content: newNote,
+          note_type: noteType,
+          created_by: profile.id
         });
       }
 
+      toast({
+        title: 'Success',
+        description: `Note ${editingNote ? 'updated' : 'added'} successfully`,
+      });
+
+      setNewNote('');
       setNoteReason('');
       setNoteType('general');
       setEditingNote(null);
@@ -261,40 +256,19 @@ export default function LeadDetailPage() {
         description: 'Failed to save note',
         variant: 'destructive',
       });
+    } finally {
+      setIsSavingNote(false);
     }
   };
 
-  const handleDeleteNote = async () => {
+  const handleDeleteNote = async (noteId: string) => {
     if (!id) return;
     try {
-      // Deleting a note in single-field system means clearing it
-      await notesApi.update(id, { content: '' });
-
-      if (profile) {
-        await activityLogsApi.create({
-          user_id: profile.id as string,
-          action: 'delete_note',
-          resource_type: 'note',
-          resource_id: id,
-          details: { action: 'cleared' },
-        });
-
-        await notificationHelper.notifyUserAndAdmins(
-          profile.id as string,
-          'Note Removed',
-          `Note on lead "${lead?.name}" has been removed.`,
-          'warning',
-          'note_deleted',
-          'lead',
-          id
-        );
-      }
-
+      await notesApi.delete(id, noteId);
       toast({
         title: 'Success',
         description: 'Note removed successfully',
       });
-
       loadData();
     } catch (error) {
       console.error('Failed to remove note:', error);
@@ -309,44 +283,29 @@ export default function LeadDetailPage() {
   const handleSaveFollowUp = async () => {
     if (!id || !profile || !followUpDate) return;
 
+    setIsSavingFollowUp(true);
     try {
-      // Simplified to always update the single lead object
-      await followUpsApi.update(`fu-${id}`, {
-        follow_up_date: followUpDate,
-        notes: followUpNotes || undefined,
-        status: followUpStatus,
-        type: followUpType,
-      });
-
-      // Auto-update lead status to remainder if scheduling for the first time
-      if (!lead?.follow_up_date) {
-        await leadsApi.update(id, { status: 'remainder' });
+      if (editingFollowUp?.id && editingFollowUp.id !== 'dummy') {
+        await followUpsApi.update(id, editingFollowUp.id, {
+          follow_up_date: followUpDate,
+          notes: followUpNotes || undefined,
+          status: followUpStatus,
+          type: followUpType,
+        });
+      } else {
+        await followUpsApi.create(id, {
+          follow_up_date: followUpDate,
+          notes: followUpNotes || undefined,
+          status: followUpStatus,
+          type: followUpType,
+          created_by: profile.id
+        });
       }
-
-      await notificationHelper.notifyUserAndAdmins(
-        profile.id as string,
-        'Follow-up Updated',
-        `Follow-up for lead "${lead?.name}" has been set for ${new Date(followUpDate).toLocaleString()}.`,
-        'info',
-        'followup_updated',
-        'lead',
-        id
-      );
 
       toast({
         title: 'Success',
-        description: 'Follow-up scheduled & Syncing',
+        description: `Follow-up ${editingFollowUp ? 'updated' : 'scheduled'}`,
       });
-
-      if (profile) {
-        await activityLogsApi.create({
-          user_id: profile.id as string,
-          action: 'update_follow_up',
-          resource_type: 'follow_up',
-          resource_id: id,
-          details: { follow_up_date: followUpDate },
-        });
-      }
 
       setFollowUpDate('');
       setFollowUpNotes('');
@@ -362,31 +321,19 @@ export default function LeadDetailPage() {
         description: 'Failed to save follow-up',
         variant: 'destructive',
       });
+    } finally {
+      setIsSavingFollowUp(false);
     }
   };
 
-  const handleCompleteFollowUp = async () => {
+  const handleCompleteFollowUp = async (followUpId: string) => {
     if (!id) return;
     try {
-      await followUpsApi.update(`fu-${id}`, { status: 'completed' });
-
-      if (profile) {
-        await notificationHelper.notifyUserAndAdmins(
-          profile.id as string,
-          'Follow-up Completed',
-          `Follow-up for lead "${lead?.name}" has been marked as completed.`,
-          'success',
-          'followup_completed',
-          'lead',
-          id
-        );
-      }
-
+      await followUpsApi.update(id, followUpId, { status: 'completed' });
       toast({
         title: 'Success',
         description: 'Follow-up marked as completed',
       });
-
       loadData();
     } catch (error) {
       console.error('Failed to complete follow-up:', error);
@@ -398,36 +345,14 @@ export default function LeadDetailPage() {
     }
   };
 
-  const handleDeleteFollowUp = async () => {
+  const handleDeleteFollowUp = async (followUpId: string) => {
     if (!id) return;
     try {
-      await followUpsApi.delete(`fu-${id}`);
-
-      if (profile) {
-        await activityLogsApi.create({
-          user_id: profile.id as string,
-          action: 'delete_follow_up',
-          resource_type: 'follow_up',
-          resource_id: id,
-          details: { action: 'removed' },
-        });
-
-        await notificationHelper.notifyUserAndAdmins(
-          profile.id as string,
-          'Follow-up Removed',
-          `Follow-up for lead "${lead?.name}" has been removed.`,
-          'warning',
-          'followup_deleted',
-          'lead',
-          id
-        );
-      }
-
+      await followUpsApi.delete(id, followUpId);
       toast({
         title: 'Success',
         description: 'Follow-up removed successfully',
       });
-
       loadData();
     } catch (error) {
       console.error('Failed to remove follow-up:', error);
@@ -482,7 +407,7 @@ export default function LeadDetailPage() {
 
   const openNewNoteDialog = () => {
     setEditingNote(null);
-    setNewNote(lead?.notes || '');
+    setNewNote('');
     setNoteReason('');
     setNoteType('general');
     setShowNoteDialog(true);
@@ -490,10 +415,10 @@ export default function LeadDetailPage() {
 
   const openNewFollowUpDialog = () => {
     setEditingFollowUp(null);
-    setFollowUpDate(lead?.follow_up_date?.slice(0, 16) || '');
-    setFollowUpNotes(lead?.notes || '');
-    setFollowUpStatus(lead?.follow_up_status || 'pending');
-    setFollowUpType(lead?.follow_up_type || 'call');
+    setFollowUpDate('');
+    setFollowUpNotes('');
+    setFollowUpStatus('pending');
+    setFollowUpType('call');
     setShowFollowUpDialog(true);
   };
 
@@ -631,7 +556,7 @@ export default function LeadDetailPage() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle>Notes</CardTitle>
-              {hasPermission('leads', 'write') && !lead.notes && (
+              {hasPermission('leads', 'write') && (
                 <Button size="sm" onClick={openNewNoteDialog}>
                   <Plus className="h-4 w-4 mr-2" />
                   Add Note
@@ -641,54 +566,61 @@ export default function LeadDetailPage() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {!lead.notes ? (
+              {notes.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-4">
                   No notes yet
                 </p>
               ) : (
-                <div className="border rounded-lg p-4 space-y-2">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <p className="text-sm whitespace-pre-wrap">{lead.notes}</p>
-                    </div>
-                    {hasPermission('leads', 'write') && (
-                      <div className="flex gap-2">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => {
-                            setNewNote(lead.notes || '');
-                            setEditingNote({ id: 'dummy' }); // Set to object to show "Update"
-                            setShowNoteDialog(true);
-                          }}
-                        >
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button variant="ghost" size="icon">
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Delete Note?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                This action will clear the lead notes.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction onClick={handleDeleteNote}>
-                                Delete
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
+                notes.map(note => (
+                  <div key={note.id} className="border rounded-lg p-4 space-y-2">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Badge variant="outline" className="text-xs capitalize">{note.note_type}</Badge>
+                          <span className="text-xs text-muted-foreground">{new Date(note.created_at).toLocaleString()}</span>
+                        </div>
+                        <p className="text-sm whitespace-pre-wrap">{note.content}</p>
                       </div>
-                    )}
+                      {hasPermission('leads', 'write') && (
+                        <div className="flex gap-2">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => {
+                              setNewNote(note.content || '');
+                              setNoteType(note.note_type || 'general');
+                              setEditingNote(note);
+                              setShowNoteDialog(true);
+                            }}
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="ghost" size="icon">
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Delete Note?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  This action cannot be undone.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => handleDeleteNote(note.id)}>
+                                  Delete
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
+                ))
               )}
             </div>
           </CardContent>
@@ -697,8 +629,8 @@ export default function LeadDetailPage() {
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle>Follow-up Reminder</CardTitle>
-              {hasPermission('leads', 'write') && !lead.follow_up_date && (
+              <CardTitle>Follow-up Reminders</CardTitle>
+              {hasPermission('leads', 'write') && (
                 <Button size="sm" onClick={openNewFollowUpDialog}>
                   <Plus className="h-4 w-4 mr-2" />
                   Schedule
@@ -707,82 +639,86 @@ export default function LeadDetailPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {!lead.follow_up_date ? (
+            <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+              {followUps.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-4">
-                  No follow-up scheduled
+                  No follow-ups scheduled
                 </p>
               ) : (
-                <div className="border rounded-lg p-4 space-y-2">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <Clock className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-sm font-medium">
-                          {new Date(lead.follow_up_date).toLocaleString()}
-                        </span>
-                        {lead.follow_up_type && (
-                          <Badge variant="outline" className="text-xs">
-                            {lead.follow_up_type}
+                followUps.map(fu => (
+                  <div key={fu.id} className="border rounded-lg p-4 space-y-2">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Clock className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-sm font-medium">
+                            {new Date(fu.follow_up_date).toLocaleString()}
+                          </span>
+                          <Badge variant="outline" className="text-xs capitalize">
+                            {fu.type}
                           </Badge>
+                        </div>
+                        {fu.notes && (
+                          <p className="text-sm mt-2 text-muted-foreground mb-3 border-l-2 pl-2">
+                            {fu.notes}
+                          </p>
                         )}
-                      </div>
-                      <div className="flex items-center gap-2 mt-2">
-                        <Badge variant={lead.follow_up_status === 'completed' ? 'default' : 'secondary'}>
-                          {lead.follow_up_status || 'pending'}
+                        <Badge variant={fu.status === 'completed' ? 'default' : fu.status === 'cancelled' ? 'destructive' : 'secondary'} className="capitalize">
+                          {fu.status}
                         </Badge>
                       </div>
-                    </div>
-                    {hasPermission('leads', 'write') && (
-                      <div className="flex gap-2">
-                        {lead.follow_up_status !== 'completed' && (
+                      {hasPermission('leads', 'write') && (
+                        <div className="flex gap-2">
+                          {fu.status !== 'completed' && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleCompleteFollowUp(fu.id)}
+                              title="Mark as completed"
+                            >
+                              <CheckCircle className="h-4 w-4" />
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={handleCompleteFollowUp}
-                            title="Mark as completed"
+                            onClick={() => {
+                              setFollowUpDate(fu.follow_up_date?.slice(0, 16) || '');
+                              setFollowUpType(fu.type || 'call');
+                              setFollowUpStatus(fu.status || 'pending');
+                              setFollowUpNotes(fu.notes || '');
+                              setEditingFollowUp(fu);
+                              setShowFollowUpDialog(true);
+                            }}
                           >
-                            <CheckCircle className="h-4 w-4" />
+                            <Edit className="h-4 w-4" />
                           </Button>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => {
-                            setFollowUpDate(lead.follow_up_date?.slice(0, 16) || '');
-                            setFollowUpType(lead.follow_up_type || 'call');
-                            setFollowUpStatus(lead.follow_up_status || 'pending');
-                            setEditingFollowUp({ id: 'dummy' }); // Set to object to show "Edit"
-                            setShowFollowUpDialog(true);
-                          }}
-                        >
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button variant="ghost" size="icon">
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Delete Follow-up?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                This will remove the follow-up reminder.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction onClick={handleDeleteFollowUp}>
-                                Delete
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </div>
-                    )}
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="ghost" size="icon">
+                                <Trash2 className="h-4 w-4 text-red-500 hover:text-red-700" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Delete Follow-up?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  This will remove the follow-up reminder.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => handleDeleteFollowUp(fu.id)}>
+                                  Delete
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
+                ))
               )}
             </div>
           </CardContent>
@@ -835,10 +771,11 @@ export default function LeadDetailPage() {
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowNoteDialog(false)}>
+            <Button variant="outline" onClick={() => setShowNoteDialog(false)} disabled={isSavingNote}>
               Cancel
             </Button>
-            <Button onClick={handleSaveNote}>
+            <Button onClick={handleSaveNote} disabled={isSavingNote}>
+              {isSavingNote && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {editingNote ? 'Update' : 'Add'} Note
             </Button>
           </DialogFooter>
@@ -907,10 +844,11 @@ export default function LeadDetailPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowFollowUpDialog(false)}>
+            <Button variant="outline" onClick={() => setShowFollowUpDialog(false)} disabled={isSavingFollowUp}>
               Cancel
             </Button>
-            <Button onClick={handleSaveFollowUp}>
+            <Button onClick={handleSaveFollowUp} disabled={isSavingFollowUp}>
+              {isSavingFollowUp && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {editingFollowUp ? 'Update' : 'Schedule'}
             </Button>
           </DialogFooter>
