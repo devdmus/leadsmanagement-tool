@@ -49,10 +49,10 @@ function toApiBase(siteUrl: string): string {
 // ── Hardcoded default permissions (fallback when Express backend is unreachable) ──
 const HARDCODED_DEFAULT_PERMISSIONS: PermissionMatrix = {
   super_admin: {
+    dashboard: { can_read: true, can_write: false },
     leads: { can_read: true, can_write: true },
     users: { can_read: true, can_write: true },
     activity_logs: { can_read: true, can_write: true },
-    subscriptions: { can_read: true, can_write: true },
     seo_meta_tags: { can_read: true, can_write: true },
     blogs: { can_read: true, can_write: true },
     sites: { can_read: true, can_write: true },
@@ -60,10 +60,10 @@ const HARDCODED_DEFAULT_PERMISSIONS: PermissionMatrix = {
     permissions: { can_read: true, can_write: true },
   },
   admin: {
+    dashboard: { can_read: true, can_write: false },
     leads: { can_read: true, can_write: true },
     users: { can_read: true, can_write: true },
     activity_logs: { can_read: true, can_write: true },
-    subscriptions: { can_read: true, can_write: true },
     seo_meta_tags: { can_read: true, can_write: true },
     blogs: { can_read: true, can_write: true },
     sites: { can_read: true, can_write: true },
@@ -71,10 +71,10 @@ const HARDCODED_DEFAULT_PERMISSIONS: PermissionMatrix = {
     permissions: { can_read: false, can_write: false },
   },
   lead_manager: {
+    dashboard: { can_read: true, can_write: false },
     leads: { can_read: true, can_write: true },
     users: { can_read: true, can_write: false },
     activity_logs: { can_read: true, can_write: false },
-    subscriptions: { can_read: false, can_write: false },
     seo_meta_tags: { can_read: false, can_write: false },
     blogs: { can_read: false, can_write: false },
     sites: { can_read: false, can_write: false },
@@ -82,10 +82,10 @@ const HARDCODED_DEFAULT_PERMISSIONS: PermissionMatrix = {
     permissions: { can_read: false, can_write: false },
   },
   seo_manager: {
+    dashboard: { can_read: true, can_write: false },
     leads: { can_read: false, can_write: false },
     users: { can_read: true, can_write: false },
     activity_logs: { can_read: true, can_write: false },
-    subscriptions: { can_read: false, can_write: false },
     seo_meta_tags: { can_read: true, can_write: true },
     blogs: { can_read: true, can_write: true },
     sites: { can_read: false, can_write: false },
@@ -93,10 +93,10 @@ const HARDCODED_DEFAULT_PERMISSIONS: PermissionMatrix = {
     permissions: { can_read: false, can_write: false },
   },
   sales_person: {
+    dashboard: { can_read: true, can_write: false },
     leads: { can_read: true, can_write: true },
     users: { can_read: true, can_write: false },
     activity_logs: { can_read: false, can_write: false },
-    subscriptions: { can_read: false, can_write: false },
     seo_meta_tags: { can_read: false, can_write: false },
     blogs: { can_read: false, can_write: false },
     sites: { can_read: false, can_write: false },
@@ -104,10 +104,10 @@ const HARDCODED_DEFAULT_PERMISSIONS: PermissionMatrix = {
     permissions: { can_read: false, can_write: false },
   },
   seo_person: {
+    dashboard: { can_read: true, can_write: false },
     leads: { can_read: false, can_write: false },
     users: { can_read: true, can_write: false },
     activity_logs: { can_read: false, can_write: false },
-    subscriptions: { can_read: false, can_write: false },
     seo_meta_tags: { can_read: true, can_write: true },
     blogs: { can_read: true, can_write: true },
     sites: { can_read: false, can_write: false },
@@ -115,10 +115,10 @@ const HARDCODED_DEFAULT_PERMISSIONS: PermissionMatrix = {
     permissions: { can_read: false, can_write: false },
   },
   client: {
+    dashboard: { can_read: false, can_write: false },
     leads: { can_read: true, can_write: false },
     users: { can_read: false, can_write: false },
     activity_logs: { can_read: false, can_write: false },
-    subscriptions: { can_read: true, can_write: false },
     seo_meta_tags: { can_read: false, can_write: false },
     blogs: { can_read: false, can_write: false },
     sites: { can_read: false, can_write: false },

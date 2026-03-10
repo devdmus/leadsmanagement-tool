@@ -236,9 +236,9 @@ export const wpLeadsApi = {
     const API_BASE = getApiBase();
     const API_KEY = getApiKey();
 
-    console.log('🚀 Sending Delete Request:', id);
+    console.log('🚀 Sending Delete Request for lead:', id);
 
-    // Also remove from local cache
+    // Remove from local cache immediately
     const updates = getLocalUpdates();
     delete updates[id];
     localStorage.setItem('crm_leads_local_updates', JSON.stringify(updates));
@@ -248,11 +248,12 @@ export const wpLeadsApi = {
     });
 
     if (!res.ok) {
-      console.error('❌ API Delete Error:', res.status);
-      // Don't throw if we want the UI to "look" like it deleted
-      return { success: true, local: true };
+      const errText = await res.text().catch(() => res.status.toString());
+      console.error('❌ API Delete Error:', res.status, errText);
+      throw new Error(`Failed to delete lead: ${res.status} — ${errText}`);
     }
 
-    return res.json();
+    console.log('✅ Lead deleted on server:', id);
+    return res.json().catch(() => ({ success: true }));
   },
 };

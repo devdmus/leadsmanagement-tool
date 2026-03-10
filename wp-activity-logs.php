@@ -164,6 +164,37 @@ function crm_create_custom_tables()
         UNIQUE KEY post_id (post_id)
     ) $charset_collate;";
 
+    // Lead Notes Table (multiple notes per lead)
+    $table_notes = $wpdb->prefix . 'crm_lead_notes';
+    $sql_notes = "CREATE TABLE IF NOT EXISTS $table_notes (
+        id bigint(20) NOT NULL AUTO_INCREMENT,
+        lead_id bigint(20) NOT NULL,
+        content text NOT NULL,
+        note_type varchar(50) DEFAULT 'general',
+        created_by bigint(20),
+        created_at datetime DEFAULT CURRENT_TIMESTAMP,
+        updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        KEY lead_id (lead_id)
+    ) $charset_collate;";
+
+    // Lead Follow-ups Table (multiple follow-ups per lead)
+    $table_followups = $wpdb->prefix . 'crm_lead_follow_ups';
+    $sql_followups = "CREATE TABLE IF NOT EXISTS $table_followups (
+        id bigint(20) NOT NULL AUTO_INCREMENT,
+        lead_id bigint(20) NOT NULL,
+        follow_up_date datetime NOT NULL,
+        type varchar(50) DEFAULT 'call',
+        status varchar(50) DEFAULT 'pending',
+        notes text,
+        created_by bigint(20),
+        created_at datetime DEFAULT CURRENT_TIMESTAMP,
+        updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        KEY lead_id (lead_id),
+        KEY status (status)
+    ) $charset_collate;";
+
     require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
     dbDelta($sql_logs);
     dbDelta($sql_leads);
@@ -172,6 +203,8 @@ function crm_create_custom_tables()
     dbDelta($sql_dismissals);
     dbDelta($sql_seo_meta);
     dbDelta($sql_blog_assignments);
+    dbDelta($sql_notes);
+    dbDelta($sql_followups);
 }
 
 register_activation_hook(__FILE__, 'crm_create_custom_tables');
@@ -269,11 +302,18 @@ add_action('rest_api_init', function () {
         ]
     ]);
 
-    // Also support /lead/{id} if frontend uses it
+    // Also support /lead/{id} — update AND delete
     register_rest_route('crm/v1', '/lead/(?P<id>\d+)', [
-        'methods' => 'POST',
-        'callback' => 'update_crm_lead',
-        'permission_callback' => 'crm_check_api_key'
+        [
+            'methods' => 'POST',
+            'callback' => 'update_crm_lead',
+            'permission_callback' => 'crm_check_api_key'
+        ],
+        [
+            'methods' => 'DELETE',
+            'callback' => 'crm_delete_lead',
+            'permission_callback' => 'crm_check_api_key'
+        ]
     ]);
 
     // Notifications
@@ -341,6 +381,58 @@ add_action('rest_api_init', function () {
         [
             'methods' => 'DELETE',
             'callback' => 'crm_delete_seo_meta',
+            'permission_callback' => 'crm_check_api_key'
+        ]
+    ]);
+
+    // Lead Notes
+    register_rest_route('crm/v1', '/leads/(?P<lead_id>\d+)/notes', [
+        [
+            'methods' => 'GET',
+            'callback' => 'crm_get_lead_notes',
+            'permission_callback' => 'crm_check_api_key'
+        ],
+        [
+            'methods' => 'POST',
+            'callback' => 'crm_create_lead_note',
+            'permission_callback' => 'crm_check_api_key'
+        ]
+    ]);
+    register_rest_route('crm/v1', '/leads/(?P<lead_id>\d+)/notes/(?P<note_id>\d+)', [
+        [
+            'methods' => 'POST',
+            'callback' => 'crm_update_lead_note',
+            'permission_callback' => 'crm_check_api_key'
+        ],
+        [
+            'methods' => 'DELETE',
+            'callback' => 'crm_delete_lead_note',
+            'permission_callback' => 'crm_check_api_key'
+        ]
+    ]);
+
+    // Lead Follow-ups
+    register_rest_route('crm/v1', '/leads/(?P<lead_id>\d+)/followups', [
+        [
+            'methods' => 'GET',
+            'callback' => 'crm_get_lead_followups',
+            'permission_callback' => 'crm_check_api_key'
+        ],
+        [
+            'methods' => 'POST',
+            'callback' => 'crm_create_lead_followup',
+            'permission_callback' => 'crm_check_api_key'
+        ]
+    ]);
+    register_rest_route('crm/v1', '/leads/(?P<lead_id>\d+)/followups/(?P<followup_id>\d+)', [
+        [
+            'methods' => 'POST',
+            'callback' => 'crm_update_lead_followup',
+            'permission_callback' => 'crm_check_api_key'
+        ],
+        [
+            'methods' => 'DELETE',
+            'callback' => 'crm_delete_lead_followup',
             'permission_callback' => 'crm_check_api_key'
         ]
     ]);
@@ -481,14 +573,14 @@ function crm_get_activity_logs($request)
     error_log('🔍 WP crm_get_activity_logs - page: ' . $page . ', limit: ' . $limit . ', offset: ' . $offset);
 
     // Total count for pagination
-    $total = (int) $wpdb->get_var("SELECT COUNT(*) FROM $table_logs");
+    $total = (int)$wpdb->get_var("SELECT COUNT(*) FROM $table_logs");
 
     $results = $wpdb->get_results(
         $wpdb->prepare(
-            "SELECT * FROM $table_logs ORDER BY timestamp DESC LIMIT %d OFFSET %d",
-            $limit,
-            $offset
-        )
+        "SELECT * FROM $table_logs ORDER BY timestamp DESC LIMIT %d OFFSET %d",
+        $limit,
+        $offset
+    )
     );
 
     if ($wpdb->last_error) {
@@ -499,9 +591,9 @@ function crm_get_activity_logs($request)
     error_log('✅ WP crm_get_activity_logs returned ' . count($results) . ' of ' . $total . ' total');
 
     return new WP_REST_Response(array(
-        'logs'    => $results,
-        'total'   => $total,
-        'page'    => $page,
+        'logs' => $results,
+        'total' => $total,
+        'page' => $page,
         'perPage' => $limit,
     ), 200);
 }
@@ -1026,25 +1118,25 @@ function crm_create_seo_meta($request)
 
     $wpdb->insert($table, [
         'page_identifier' => sanitize_text_field($data['page_identifier']),
-        'post_id'         => sanitize_text_field($data['post_id'] ?? ''),
-        'rest_base'       => sanitize_text_field($data['rest_base'] ?? ''),
-        'title'           => sanitize_text_field($data['title'] ?? ''),
-        'keywords'        => sanitize_textarea_field($data['keywords'] ?? ''),
-        'description'     => sanitize_textarea_field($data['description'] ?? ''),
-        'assigned_to'     => sanitize_text_field($data['assigned_to'] ?? ''),
+        'post_id' => sanitize_text_field($data['post_id'] ?? ''),
+        'rest_base' => sanitize_text_field($data['rest_base'] ?? ''),
+        'title' => sanitize_text_field($data['title'] ?? ''),
+        'keywords' => sanitize_textarea_field($data['keywords'] ?? ''),
+        'description' => sanitize_textarea_field($data['description'] ?? ''),
+        'assigned_to' => sanitize_text_field($data['assigned_to'] ?? ''),
     ]);
 
     return rest_ensure_response([
-        'id'              => $wpdb->insert_id,
+        'id' => $wpdb->insert_id,
         'page_identifier' => $data['page_identifier'],
-        'post_id'         => $data['post_id'] ?? '',
-        'rest_base'       => $data['rest_base'] ?? '',
-        'title'           => $data['title'] ?? '',
-        'keywords'        => $data['keywords'] ?? '',
-        'description'     => $data['description'] ?? '',
-        'assigned_to'     => $data['assigned_to'] ?? '',
-        'created_at'      => current_time('mysql'),
-        'updated_at'      => current_time('mysql'),
+        'post_id' => $data['post_id'] ?? '',
+        'rest_base' => $data['rest_base'] ?? '',
+        'title' => $data['title'] ?? '',
+        'keywords' => $data['keywords'] ?? '',
+        'description' => $data['description'] ?? '',
+        'assigned_to' => $data['assigned_to'] ?? '',
+        'created_at' => current_time('mysql'),
+        'updated_at' => current_time('mysql'),
     ]);
 }
 
@@ -1060,13 +1152,20 @@ function crm_update_seo_meta($request)
     }
 
     $fields = [];
-    if (isset($data['page_identifier'])) $fields['page_identifier'] = sanitize_text_field($data['page_identifier']);
-    if (isset($data['post_id']))         $fields['post_id']         = sanitize_text_field($data['post_id']);
-    if (isset($data['rest_base']))       $fields['rest_base']       = sanitize_text_field($data['rest_base']);
-    if (isset($data['title']))           $fields['title']           = sanitize_text_field($data['title']);
-    if (isset($data['keywords']))        $fields['keywords']        = sanitize_textarea_field($data['keywords']);
-    if (isset($data['description']))     $fields['description']     = sanitize_textarea_field($data['description']);
-    if (isset($data['assigned_to']))     $fields['assigned_to']     = sanitize_text_field($data['assigned_to']);
+    if (isset($data['page_identifier']))
+        $fields['page_identifier'] = sanitize_text_field($data['page_identifier']);
+    if (isset($data['post_id']))
+        $fields['post_id'] = sanitize_text_field($data['post_id']);
+    if (isset($data['rest_base']))
+        $fields['rest_base'] = sanitize_text_field($data['rest_base']);
+    if (isset($data['title']))
+        $fields['title'] = sanitize_text_field($data['title']);
+    if (isset($data['keywords']))
+        $fields['keywords'] = sanitize_textarea_field($data['keywords']);
+    if (isset($data['description']))
+        $fields['description'] = sanitize_textarea_field($data['description']);
+    if (isset($data['assigned_to']))
+        $fields['assigned_to'] = sanitize_text_field($data['assigned_to']);
 
     if (empty($fields)) {
         return ['status' => 'no_changes'];
@@ -1113,7 +1212,8 @@ function crm_upsert_blog_assignment($request)
     $existing = $wpdb->get_var($wpdb->prepare("SELECT id FROM $table WHERE post_id = %s", $post_id));
     if ($existing) {
         $wpdb->update($table, ['assigned_to' => $assigned_to, 'updated_at' => current_time('mysql')], ['post_id' => $post_id]);
-    } else {
+    }
+    else {
         $wpdb->insert($table, ['post_id' => $post_id, 'assigned_to' => $assigned_to, 'updated_at' => current_time('mysql')]);
     }
 
@@ -1134,10 +1234,153 @@ function crm_bulk_assign_blogs($request)
         $existing = $wpdb->get_var($wpdb->prepare("SELECT id FROM $table WHERE post_id = %s", $post_id));
         if ($existing) {
             $wpdb->update($table, ['assigned_to' => $assigned_to, 'updated_at' => current_time('mysql')], ['post_id' => $post_id]);
-        } else {
+        }
+        else {
             $wpdb->insert($table, ['post_id' => $post_id, 'assigned_to' => $assigned_to, 'updated_at' => current_time('mysql')]);
         }
     }
 
     return rest_ensure_response(['status' => 'success', 'count' => count($post_ids)]);
+}
+
+/* ============================================================
+ LEAD NOTES — crm_lead_notes
+ ============================================================ */
+
+function crm_get_lead_notes($request)
+{
+    global $wpdb;
+    $table = $wpdb->prefix . 'crm_lead_notes';
+    $lead_id = intval($request['lead_id']);
+    $rows = $wpdb->get_results(
+        $wpdb->prepare("SELECT * FROM $table WHERE lead_id = %d ORDER BY created_at DESC", $lead_id),
+        ARRAY_A
+    );
+    return rest_ensure_response($rows ?: []);
+}
+
+function crm_create_lead_note($request)
+{
+    global $wpdb;
+    $table = $wpdb->prefix . 'crm_lead_notes';
+    $lead_id = intval($request['lead_id']);
+    $data = $request->get_json_params();
+
+    if (empty($data['content'])) {
+        return new WP_Error('missing_field', 'content is required', ['status' => 400]);
+    }
+
+    $wpdb->insert($table, [
+        'lead_id' => $lead_id,
+        'content' => sanitize_textarea_field($data['content']),
+        'note_type' => sanitize_text_field($data['note_type'] ?? 'general'),
+        'created_by' => intval($data['created_by'] ?? 0),
+        'created_at' => current_time('mysql'),
+        'updated_at' => current_time('mysql'),
+    ]);
+
+    $new_id = $wpdb->insert_id;
+    $note = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table WHERE id = %d", $new_id), ARRAY_A);
+    return rest_ensure_response($note);
+}
+
+function crm_update_lead_note($request)
+{
+    global $wpdb;
+    $table = $wpdb->prefix . 'crm_lead_notes';
+    $note_id = intval($request['note_id']);
+    $data = $request->get_json_params();
+
+    $fields = [];
+    if (isset($data['content']))
+        $fields['content'] = sanitize_textarea_field($data['content']);
+    if (isset($data['note_type']))
+        $fields['note_type'] = sanitize_text_field($data['note_type']);
+    $fields['updated_at'] = current_time('mysql');
+
+    $wpdb->update($table, $fields, ['id' => $note_id]);
+    return rest_ensure_response(['status' => 'success', 'id' => $note_id]);
+}
+
+function crm_delete_lead_note($request)
+{
+    global $wpdb;
+    $table = $wpdb->prefix . 'crm_lead_notes';
+    $note_id = intval($request['note_id']);
+    $wpdb->delete($table, ['id' => $note_id]);
+    return rest_ensure_response(['status' => 'success']);
+}
+
+/* ============================================================
+ LEAD FOLLOW-UPS — crm_lead_follow_ups
+ ============================================================ */
+
+function crm_get_lead_followups($request)
+{
+    global $wpdb;
+    $table = $wpdb->prefix . 'crm_lead_follow_ups';
+    $lead_id = intval($request['lead_id']);
+    $rows = $wpdb->get_results(
+        $wpdb->prepare("SELECT * FROM $table WHERE lead_id = %d ORDER BY follow_up_date ASC", $lead_id),
+        ARRAY_A
+    );
+    return rest_ensure_response($rows ?: []);
+}
+
+function crm_create_lead_followup($request)
+{
+    global $wpdb;
+    $table = $wpdb->prefix . 'crm_lead_follow_ups';
+    $lead_id = intval($request['lead_id']);
+    $data = $request->get_json_params();
+
+    if (empty($data['follow_up_date'])) {
+        return new WP_Error('missing_field', 'follow_up_date is required', ['status' => 400]);
+    }
+
+    $wpdb->insert($table, [
+        'lead_id' => $lead_id,
+        'follow_up_date' => sanitize_text_field($data['follow_up_date']),
+        'type' => sanitize_text_field($data['type'] ?? 'call'),
+        'status' => sanitize_text_field($data['status'] ?? 'pending'),
+        'notes' => sanitize_textarea_field($data['notes'] ?? ''),
+        'created_by' => intval($data['created_by'] ?? 0),
+        'created_at' => current_time('mysql'),
+        'updated_at' => current_time('mysql'),
+    ]);
+
+    $new_id = $wpdb->insert_id;
+    $followup = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table WHERE id = %d", $new_id), ARRAY_A);
+    return rest_ensure_response($followup);
+}
+
+function crm_update_lead_followup($request)
+{
+    global $wpdb;
+    $table = $wpdb->prefix . 'crm_lead_follow_ups';
+    $followup_id = intval($request['followup_id']);
+    $data = $request->get_json_params();
+
+    $fields = [];
+    if (isset($data['follow_up_date']))
+        $fields['follow_up_date'] = sanitize_text_field($data['follow_up_date']);
+    if (isset($data['type']))
+        $fields['type'] = sanitize_text_field($data['type']);
+    if (isset($data['status']))
+        $fields['status'] = sanitize_text_field($data['status']);
+    if (isset($data['notes']))
+        $fields['notes'] = sanitize_textarea_field($data['notes']);
+    $fields['updated_at'] = current_time('mysql');
+
+    $wpdb->update($table, $fields, ['id' => $followup_id]);
+    return rest_ensure_response(['status' => 'success', 'id' => $followup_id]);
+}
+
+function crm_delete_lead_followup($request)
+{
+    global $wpdb;
+    $table = $wpdb->prefix . 'crm_lead_follow_ups';
+    $followup_id = intval($request['followup_id']);
+    $wpdb->delete($table, ['id' => $followup_id]);
+    return rest_ensure_response(['status' => 'success']);
 }
