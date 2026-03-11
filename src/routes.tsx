@@ -7,6 +7,7 @@ import LeadDetailPage from './pages/LeadDetailPage';
 import SeoPage from './pages/SeoPage';
 import BlogsPage from './pages/BlogsPage';
 import BlogDetailPage from './pages/BlogDetailPage';
+import BlogViewPage from './pages/BlogViewPage';
 import SitesPage from './pages/SitesPage';
 import IPSecurityPage from './pages/IPSecurityPage';
 import UsersPage from './pages/UsersPage';
@@ -55,6 +56,11 @@ const routes: RouteConfig[] = [
     name: 'Blog Detail',
     path: '/blogs/:id',
     element: <BlogDetailPage />
+  },
+  {
+    name: 'Blog View',
+    path: '/blogs/view/:id',
+    element: <BlogViewPage />
   },
   {
     name: 'Sites',
