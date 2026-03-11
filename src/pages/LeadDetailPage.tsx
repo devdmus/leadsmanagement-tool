@@ -27,7 +27,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { ArrowLeft, Mail, Phone, Calendar, Trash2, Edit, Plus, Clock, CheckCircle, Loader2 } from 'lucide-react';
+import { ArrowLeft, Mail, Phone, Calendar, Trash2, Edit, Plus, Clock, CheckCircle, Loader2, MoreHorizontal, Eye, Sparkles } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -88,10 +95,10 @@ export default function LeadDetailPage() {
   const [followUps, setFollowUps] = useState<any[]>([]);
 
   const [newNote, setNewNote] = useState('');
-  const [noteReason, setNoteReason] = useState('');
-  const [noteType, setNoteType] = useState('general');
   const [editingNote, setEditingNote] = useState<any | null>(null);
   const [showNoteDialog, setShowNoteDialog] = useState(false);
+  const [viewingNote, setViewingNote] = useState<any | null>(null);
+  const [viewingFollowUp, setViewingFollowUp] = useState<any | null>(null);
 
   const [showFollowUpDialog, setShowFollowUpDialog] = useState(false);
   const [editingFollowUp, setEditingFollowUp] = useState<any | null>(null);
@@ -228,12 +235,12 @@ export default function LeadDetailPage() {
       if (editingNote?.id && editingNote.id !== 'dummy') {
         await notesApi.update(id, editingNote.id, {
           content: newNote,
-          note_type: noteType,
+          note_type: 'general',
         });
       } else {
         await notesApi.create(id, {
           content: newNote,
-          note_type: noteType,
+          note_type: 'general',
           created_by: profile.id
         });
       }
@@ -244,8 +251,6 @@ export default function LeadDetailPage() {
       });
 
       setNewNote('');
-      setNoteReason('');
-      setNoteType('general');
       setEditingNote(null);
       setShowNoteDialog(false);
       loadData();
@@ -408,8 +413,6 @@ export default function LeadDetailPage() {
   const openNewNoteDialog = () => {
     setEditingNote(null);
     setNewNote('');
-    setNoteReason('');
-    setNoteType('general');
     setShowNoteDialog(true);
   };
 
@@ -476,9 +479,17 @@ export default function LeadDetailPage() {
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle className="text-2xl">{lead.name}</CardTitle>
-          <CardDescription>Lead Details</CardDescription>
+        <CardHeader className="space-y-2 pb-6">
+          <CardDescription className="flex items-center gap-2">
+
+            <span className="inline-block text-lg font-bold tracking-[0.1em] uppercase bg-clip-text text-transparent bg-gradient-to-r from-primary via-purple-500 to-primary bg-[length:200%_auto] animate-gradient">
+              Lead Profile
+            </span>
+            <Sparkles className="h-4 w-4 text-purple-500 animate-pulse" />
+          </CardDescription>
+          <CardTitle className="text-2xl font-bold tracking-tight text-foreground capitalize">
+            {lead.name}
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -542,9 +553,16 @@ export default function LeadDetailPage() {
 
             <div className="space-y-2">
               <Label>Created</Label>
-              <div className="flex items-center gap-2 text-sm">
+              <div className="flex items-center gap-2 text-sm text-foreground font-medium">
                 <Calendar className="h-4 w-4 text-muted-foreground" />
-                <span>{new Date(lead.created_at).toLocaleString()}</span>
+                <span>
+                  {new Date(lead.created_at + (lead.created_at.includes('Z') ? '' : 'Z')).toLocaleDateString()},{' '}
+                  {new Date(lead.created_at + (lead.created_at.includes('Z') ? '' : 'Z')).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: true
+                  })}
+                </span>
               </div>
             </div>
           </div>
@@ -553,7 +571,7 @@ export default function LeadDetailPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
-          <CardHeader>
+          <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
               <CardTitle>Notes</CardTitle>
               {hasPermission('leads', 'write') && (
@@ -573,51 +591,77 @@ export default function LeadDetailPage() {
               ) : (
                 notes.map(note => (
                   <div key={note.id} className="border rounded-lg p-4 space-y-2">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-2">
-                          <Badge variant="outline" className="text-xs capitalize">{note.note_type}</Badge>
-                          <span className="text-xs text-muted-foreground">{new Date(note.created_at).toLocaleString()}</span>
+                          <span className="text-xs text-muted-foreground truncate">{new Date(note.created_at).toLocaleString()}</span>
                         </div>
-                        <p className="text-sm whitespace-pre-wrap">{note.content}</p>
+                        <p
+                          className="text-sm"
+                          style={{
+                            display: '-webkit-box',
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden',
+                            wordBreak: 'break-word',
+                          }}
+                        >
+                          {note.content}
+                        </p>
                       </div>
-                      {hasPermission('leads', 'write') && (
-                        <div className="flex gap-2">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => {
-                              setNewNote(note.content || '');
-                              setNoteType(note.note_type || 'general');
-                              setEditingNote(note);
-                              setShowNoteDialog(true);
-                            }}
-                          >
-                            <Edit className="h-4 w-4" />
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="shrink-0 h-8 w-8">
+                            <MoreHorizontal className="h-4 w-4" />
                           </Button>
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button variant="ghost" size="icon">
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>Delete Note?</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  This action cannot be undone.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction onClick={() => handleDeleteNote(note.id)}>
-                                  Delete
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        </div>
-                      )}
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => setViewingNote(note)}>
+                            <Eye className="h-4 w-4 mr-2" />
+                            View Note
+                          </DropdownMenuItem>
+                          {hasPermission('leads', 'write') && (
+                            <>
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setNewNote(note.content || '');
+                                  setEditingNote(note);
+                                  setShowNoteDialog(true);
+                                }}
+                              >
+                                <Edit className="h-4 w-4 mr-2" />
+                                Edit
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                  <DropdownMenuItem
+                                    onSelect={(e) => e.preventDefault()}
+                                    className="text-destructive focus:text-destructive"
+                                  >
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    Delete
+                                  </DropdownMenuItem>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                  <AlertDialogHeader>
+                                    <AlertDialogTitle>Delete Note?</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                      This action cannot be undone.
+                                    </AlertDialogDescription>
+                                  </AlertDialogHeader>
+                                  <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction onClick={() => handleDeleteNote(note.id)}>
+                                      Delete
+                                    </AlertDialogAction>
+                                  </AlertDialogFooter>
+                                </AlertDialogContent>
+                              </AlertDialog>
+                            </>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   </div>
                 ))
@@ -627,7 +671,7 @@ export default function LeadDetailPage() {
         </Card>
 
         <Card>
-          <CardHeader>
+          <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
               <CardTitle>Follow-up Reminders</CardTitle>
               {hasPermission('leads', 'write') && (
@@ -647,8 +691,8 @@ export default function LeadDetailPage() {
               ) : (
                 followUps.map(fu => (
                   <div key={fu.id} className="border rounded-lg p-4 space-y-2">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-2">
                           <Clock className="h-4 w-4 text-muted-foreground" />
                           <span className="text-sm font-medium">
@@ -659,62 +703,87 @@ export default function LeadDetailPage() {
                           </Badge>
                         </div>
                         {fu.notes && (
-                          <p className="text-sm mt-2 text-muted-foreground mb-3 border-l-2 pl-2">
-                            {fu.notes}
-                          </p>
+                          <>
+                            <p
+                              className="text-sm mt-2 text-muted-foreground mb-1 border-l-2 pl-2"
+                              style={{
+                                display: '-webkit-box',
+                                WebkitLineClamp: 4,
+                                WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden',
+                                wordBreak: 'break-word',
+                              }}
+                            >
+                              {fu.notes}
+                            </p>
+                            {/* <button
+                              className="text-xs text-primary hover:underline mb-3 flex items-center gap-1"
+                              onClick={() => setViewingFollowUp(fu)}
+                            >
+                              <Eye className="h-3 w-3" /> View note
+                            </button> */}
+                          </>
                         )}
                         <Badge variant={fu.status === 'completed' ? 'default' : fu.status === 'cancelled' ? 'destructive' : 'secondary'} className="capitalize">
                           {fu.status}
                         </Badge>
                       </div>
                       {hasPermission('leads', 'write') && (
-                        <div className="flex gap-2">
-                          {fu.status !== 'completed' && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleCompleteFollowUp(fu.id)}
-                              title="Mark as completed"
-                            >
-                              <CheckCircle className="h-4 w-4" />
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="shrink-0 h-8 w-8">
+                              <MoreHorizontal className="h-4 w-4" />
                             </Button>
-                          )}
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => {
-                              setFollowUpDate(fu.follow_up_date?.slice(0, 16) || '');
-                              setFollowUpType(fu.type || 'call');
-                              setFollowUpStatus(fu.status || 'pending');
-                              setFollowUpNotes(fu.notes || '');
-                              setEditingFollowUp(fu);
-                              setShowFollowUpDialog(true);
-                            }}
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button variant="ghost" size="icon">
-                                <Trash2 className="h-4 w-4 text-red-500 hover:text-red-700" />
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>Delete Follow-up?</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  This will remove the follow-up reminder.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction onClick={() => handleDeleteFollowUp(fu.id)}>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => setViewingFollowUp(fu)}>
+                              <Eye className="h-4 w-4 mr-2" />
+                              View Follow-up
+                            </DropdownMenuItem>
+                            {fu.status !== 'completed' && (
+                              <DropdownMenuItem onClick={() => handleCompleteFollowUp(fu.id)}>
+                                <CheckCircle className="h-4 w-4 mr-2" />
+                                Mark as completed
+                              </DropdownMenuItem>
+                            )}
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setFollowUpDate(fu.follow_up_date?.slice(0, 16) || '');
+                                setFollowUpType(fu.type || 'call');
+                                setFollowUpStatus(fu.status || 'pending');
+                                setFollowUpNotes(fu.notes || '');
+                                setEditingFollowUp(fu);
+                                setShowFollowUpDialog(true);
+                              }}
+                            >
+                              <Edit className="h-4 w-4 mr-2" />
+                              Edit
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <DropdownMenuItem onSelect={(e) => e.preventDefault()} className="text-destructive focus:text-destructive">
+                                  <Trash2 className="h-4 w-4 mr-2" />
                                   Delete
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        </div>
+                                </DropdownMenuItem>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Delete Follow-up?</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    This will remove the follow-up reminder.
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction onClick={() => handleDeleteFollowUp(fu.id)}>
+                                    Delete
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       )}
                     </div>
                   </div>
@@ -724,6 +793,83 @@ export default function LeadDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* View Follow-up Dialog */}
+      <Dialog open={!!viewingFollowUp} onOpenChange={(open) => !open && setViewingFollowUp(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Follow-up Details</DialogTitle>
+            {viewingFollowUp && (
+              <DialogDescription>
+                <span className="capitalize">{viewingFollowUp.type}</span>
+                {' · '}{new Date(viewingFollowUp.follow_up_date).toLocaleString()}
+                {' · '}
+                <span className="capitalize">{viewingFollowUp.status}</span>
+              </DialogDescription>
+            )}
+          </DialogHeader>
+          {viewingFollowUp?.notes && (
+            <div className="p-4 bg-muted/50 rounded-lg text-sm whitespace-pre-wrap break-words max-h-96 overflow-y-auto">
+              {viewingFollowUp.notes}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setViewingFollowUp(null)}>Close</Button>
+            {hasPermission('leads', 'write') && viewingFollowUp && (
+              <Button
+                onClick={() => {
+                  setFollowUpDate(viewingFollowUp.follow_up_date?.slice(0, 16) || '');
+                  setFollowUpType(viewingFollowUp.type || 'call');
+                  setFollowUpStatus(viewingFollowUp.status || 'pending');
+                  setFollowUpNotes(viewingFollowUp.notes || '');
+                  setEditingFollowUp(viewingFollowUp);
+                  setViewingFollowUp(null);
+                  setShowFollowUpDialog(true);
+                }}
+              >
+                <Edit className="h-4 w-4 mr-2" />
+                Edit Follow-up
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* View Note Dialog */}
+      <Dialog open={!!viewingNote} onOpenChange={(open) => !open && setViewingNote(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Note Details</DialogTitle>
+            {viewingNote && (
+              <DialogDescription>
+                <span className="capitalize">{viewingNote.note_type?.replace(/_/g, ' ')}</span>
+                {' · '}{new Date(viewingNote.created_at).toLocaleString()}
+              </DialogDescription>
+            )}
+          </DialogHeader>
+          {viewingNote && (
+            <div className="p-4 bg-muted/50 rounded-lg text-sm whitespace-pre-wrap break-words max-h-96 overflow-y-auto">
+              {viewingNote.content}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setViewingNote(null)}>Close</Button>
+            {hasPermission('leads', 'write') && viewingNote && (
+              <Button
+                onClick={() => {
+                  setNewNote(viewingNote.content || '');
+                  setEditingNote(viewingNote);
+                  setViewingNote(null);
+                  setShowNoteDialog(true);
+                }}
+              >
+                <Edit className="h-4 w-4 mr-2" />
+                Edit Note
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Note Dialog */}
       <Dialog open={showNoteDialog} onOpenChange={setShowNoteDialog}>
@@ -735,22 +881,10 @@ export default function LeadDetailPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div>
-              <Label htmlFor="note_type">Note Type</Label>
-              <Select value={noteType} onValueChange={setNoteType}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="general">General</SelectItem>
-                  <SelectItem value="pending_reason">Pending Reason</SelectItem>
-                  <SelectItem value="remainder_reason">Remainder Reason</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+
             <div>
               <Label htmlFor="note_content">Content</Label>
-              <Textarea
+              <Textarea className="my-2"
                 id="note_content"
                 value={newNote}
                 onChange={(e) => setNewNote(e.target.value)}
@@ -758,17 +892,7 @@ export default function LeadDetailPage() {
                 rows={4}
               />
             </div>
-            {(noteType === 'pending_reason' || noteType === 'remainder_reason') && (
-              <div>
-                <Label htmlFor="note_reason">Reason</Label>
-                <Input
-                  id="note_reason"
-                  value={noteReason}
-                  onChange={(e) => setNoteReason(e.target.value)}
-                  placeholder="Enter reason..."
-                />
-              </div>
-            )}
+
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowNoteDialog(false)} disabled={isSavingNote}>
@@ -798,6 +922,7 @@ export default function LeadDetailPage() {
                 id="follow_up_date"
                 type="datetime-local"
                 value={followUpDate}
+                min={new Date().toISOString().slice(0, 16)}
                 onChange={(e) => setFollowUpDate(e.target.value)}
               />
             </div>
@@ -834,12 +959,13 @@ export default function LeadDetailPage() {
             )}
             <div>
               <Label htmlFor="follow_up_notes">Notes</Label>
-              <Textarea
+              <Textarea className="my-2"
                 id="follow_up_notes"
                 value={followUpNotes}
                 onChange={(e) => setFollowUpNotes(e.target.value)}
                 placeholder="Add notes for this follow-up..."
                 rows={3}
+                style={{ wordBreak: 'break-word', overflowX: 'hidden', resize: 'vertical' }}
               />
             </div>
           </div>
