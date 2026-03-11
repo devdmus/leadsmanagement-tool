@@ -670,7 +670,7 @@ export default function BlogDetailPage() {
                             onChange={value => setFormData(prev => ({ ...prev, content: value }))}
                             placeholder="Write your full blog content here..."
                             readOnly={saving}
-                            style={{ minHeight: '300px' }}
+                            
                             modules={{
                                 toolbar: [
                                     [{ header: [1, 2, 3, false] }],
