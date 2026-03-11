@@ -27,7 +27,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { ArrowLeft, Mail, Phone, Calendar, Trash2, Edit, Plus, Clock, CheckCircle, Loader2, MoreHorizontal, Eye, Sparkles } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,7 +34,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { ArrowLeft, Mail, Phone, Calendar, Trash2, Edit, Plus, Clock, CheckCircle, Loader2, Check, X } from 'lucide-react';
+import { ArrowLeft, Mail, Phone, Calendar, Trash2, Edit, Plus, Clock, CheckCircle, Loader2, MoreHorizontal, Eye, Sparkles, Check, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -494,23 +493,18 @@ export default function LeadDetailPage() {
       <Card>
         <CardHeader className="space-y-2 pb-6">
           <CardDescription className="flex items-center gap-2">
-
             <span className="inline-block text-lg font-bold tracking-[0.1em] uppercase bg-clip-text text-transparent bg-gradient-to-r from-primary via-purple-500 to-primary bg-[length:200%_auto] animate-gradient">
               Lead Profile
             </span>
             <Sparkles className="h-4 w-4 text-purple-500 animate-pulse" />
           </CardDescription>
-          <CardTitle className="text-2xl font-bold tracking-tight text-foreground capitalize">
-            {lead.name}
-          </CardTitle>
-        <CardHeader>
           <div className="flex items-center gap-2">
             {isEditingName ? (
               <div className="flex items-center gap-2">
                 <Input
                   value={nameInput}
                   onChange={(e) => setNameInput(e.target.value)}
-                  className="h-9 text-2xl font-bold w-64"
+                  className="h-9 text-2xl font-bold tracking-tight capitalize w-64"
                 />
                 <Button
                   size="icon"
@@ -534,7 +528,9 @@ export default function LeadDetailPage() {
               </div>
             ) : (
               <div className="flex items-center gap-2 group">
-                <CardTitle className="text-2xl">{lead.name}</CardTitle>
+                <CardTitle className="text-2xl font-bold tracking-tight text-foreground capitalize">
+                  {lead.name}
+                </CardTitle>
                 {canEditContactInfo && (
                   <Button
                     size="icon"
@@ -551,7 +547,6 @@ export default function LeadDetailPage() {
               </div>
             )}
           </div>
-          <CardDescription>Lead Details</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
