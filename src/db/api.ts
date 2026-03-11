@@ -385,6 +385,30 @@ export const followUpsApi = {
         setLS(`crm_followups_${leadId}`, followups);
         return { success: true };
     },
+    async getDue(_siteId?: string): Promise<any[]> {
+        const allDue: any[] = [];
+        const prefix = 'crm_followups_';
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith(prefix)) {
+                try {
+                    const data = JSON.parse(localStorage.getItem(key) || '[]');
+                    const pending = data.filter((f: any) => f.status === 'pending');
+                    allDue.push(...pending);
+                } catch { }
+            }
+        }
+
+        const now = new Date();
+        now.setHours(0, 0, 0, 0);
+
+        return allDue.filter(f => {
+            if (!f.follow_up_date) return false;
+            const fuDate = new Date(f.follow_up_date);
+            fuDate.setHours(0, 0, 0, 0);
+            return fuDate.getTime() <= now.getTime();
+        }).sort((a, b) => new Date(a.follow_up_date).getTime() - new Date(b.follow_up_date).getTime());
+    },
     // Legacy compat - kept so other pages don't break
     async getAll(_siteId?: string) { return []; },
     async getByLead(leadId: string) { return this.getByLeadId(leadId); },
@@ -630,7 +654,7 @@ export const notificationsApi = {
         if (!res.ok) throw new Error('Failed to mark notification as read');
         return res.json();
     },
-    async markAllAsRead(userId: string, isSuperAdmin: boolean = false) {
+    async markAllAsRead(userId: string, isSuperAdmin: boolean = false, userRole: string = '') {
         const site = getCurrentSiteFromCache();
         if (!site?.url) throw new Error('No site selected');
 
@@ -642,12 +666,12 @@ export const notificationsApi = {
         const res = await fetch(`${apiBaseUrl}/notifications/read-all?api_key=${apiKey}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId, isSuperAdmin })
+            body: JSON.stringify({ userId, isSuperAdmin, userRole })
         });
         if (!res.ok) throw new Error('Failed to mark all notifications as read');
         return res.json();
     },
-    async clearAll(userId: string, isSuperAdmin: boolean = false) {
+    async clearAll(userId: string, isSuperAdmin: boolean = false, userRole: string = '') {
         const site = getCurrentSiteFromCache();
         if (!site?.url) throw new Error('No site selected');
 
@@ -659,7 +683,7 @@ export const notificationsApi = {
         const res = await fetch(`${apiBaseUrl}/notifications/clear?api_key=${apiKey}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId, isSuperAdmin })
+            body: JSON.stringify({ userId, isSuperAdmin, userRole })
         });
         if (!res.ok) throw new Error('Failed to clear notifications');
         return res.json();

@@ -504,10 +504,11 @@ export default function BlogsPage() {
             'success',
             'blog_created',
             'blog',
-            String(savedPost.id)
+            String(savedPost.id),
+            'seo_department'
           );
         } else {
-          await notificationHelper.notifyAdmins(
+          await notificationHelper.notifySeoAdmins(
             'Blog Created',
             `New blog "${formData.title}" has been created.`,
             'success',

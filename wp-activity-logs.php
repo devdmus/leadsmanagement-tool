@@ -790,67 +790,43 @@ function crm_get_notifications($request)
     $isSuperAdmin = $request->get_param('isSuperAdmin') === 'true';
     $userRole = sanitize_text_field($request->get_param('userRole') ?? '');
 
-    if ($isSuperAdmin) {
-        // Super admin: all notifications, with per-user read state
-        $results = $wpdb->get_results(
-            $wpdb->prepare(
-            "SELECT n.*,
-                        IF(r.id IS NOT NULL, 1, 0) AS is_read
-                 FROM $tn n
-                 LEFT JOIN $tr r ON r.notification_id = n.id AND r.user_id = %s
-                 LEFT JOIN $td d ON d.notification_id = n.id AND d.user_id = %s
-                 WHERE d.id IS NULL
-                 ORDER BY n.created_at DESC
-                 LIMIT 100",
-            $userId,
-            $userId
-        ),
-            ARRAY_A
-        );
+    $targetRole = $isSuperAdmin ? 'super_admin' : $userRole;
+    $rawId = preg_replace('/^(wp_|sa_)/', '', $userId);
+
+    // If you are 'super_admin' or 'admin', you should also catch 'admin' broadcast roles
+    // as well as any legacy data.
+    $roleCondition = "(n.role_target = %s)";
+    if ($targetRole === 'super_admin' || $targetRole === 'admin') {
+        $roleCondition = "(n.role_target = %s OR n.role_target = 'admin' OR n.role_target = 'sales_department' OR n.role_target = 'seo_department')";
     }
-    elseif ($userRole === 'admin') {
-        // Admin: own notifications + admin role broadcasts
-        $results = $wpdb->get_results(
-            $wpdb->prepare(
-            "SELECT n.*,
-                        IF(r.id IS NOT NULL, 1, 0) AS is_read
-                 FROM $tn n
-                 LEFT JOIN $tr r ON r.notification_id = n.id AND r.user_id = %s
-                 LEFT JOIN $td d ON d.notification_id = n.id AND d.user_id = %s
-                 WHERE d.id IS NULL
-                   AND (
-                       (n.user_id = %s AND (n.role_target IS NULL OR n.role_target = ''))
-                       OR n.role_target = 'admin'
-                   )
-                 ORDER BY n.created_at DESC
-                 LIMIT 100",
-            $userId,
-            $userId,
-            $userId
-        ),
-            ARRAY_A
-        );
+    elseif ($targetRole === 'lead_manager') {
+        $roleCondition = "(n.role_target = %s OR n.role_target = 'sales_department')";
     }
-    else {
-        // Regular user: ONLY notifications directly assigned to them
-        $results = $wpdb->get_results(
-            $wpdb->prepare(
-            "SELECT n.*,
-                        IF(r.id IS NOT NULL, 1, 0) AS is_read
-                 FROM $tn n
-                 LEFT JOIN $tr r ON r.notification_id = n.id AND r.user_id = %s
-                 LEFT JOIN $td d ON d.notification_id = n.id AND d.user_id = %s
-                 WHERE d.id IS NULL
-                   AND n.user_id = %s
-                 ORDER BY n.created_at DESC
-                 LIMIT 100",
-            $userId,
-            $userId,
-            $userId
-        ),
-            ARRAY_A
-        );
+    elseif ($targetRole === 'seo_manager') {
+        $roleCondition = "(n.role_target = %s OR n.role_target = 'seo_department')";
     }
+
+    $results = $wpdb->get_results(
+        $wpdb->prepare(
+        "SELECT n.*,
+                    IF(r.id IS NOT NULL, 1, 0) AS is_read
+             FROM $tn n
+             LEFT JOIN $tr r ON r.notification_id = n.id AND r.user_id = %s
+             LEFT JOIN $td d ON d.notification_id = n.id AND d.user_id = %s
+             WHERE d.id IS NULL
+               AND (n.user_id = %s OR n.user_id = %s OR (n.role_target != '' AND $roleCondition))
+             ORDER BY n.created_at DESC
+             LIMIT 100",
+        $userId,
+        $userId,
+        $userId,
+        $rawId,
+        $targetRole
+    ),
+        ARRAY_A
+    );
+
+    error_log("crm_get_notifications: userId=$userId, role=$targetRole, total=" . count($results));
 
     return rest_ensure_response($results);
 }
@@ -918,23 +894,34 @@ function crm_mark_all_notifications_read($request)
     $data = $request->get_json_params();
     $userId = sanitize_text_field($data['userId'] ?? '');
     $isSuperAdmin = !empty($data['isSuperAdmin']);
+    $userRole = sanitize_text_field($data['userRole'] ?? '');
 
     if (!$userId)
         return ['status' => 'error', 'message' => 'userId required'];
 
-    if ($isSuperAdmin) {
-        $notifIds = $wpdb->get_col("SELECT id FROM $tn");
+    $targetRole = $isSuperAdmin ? 'super_admin' : $userRole;
+    $rawId = preg_replace('/^(wp_|sa_)/', '', $userId);
+
+    $roleCondition = "role_target = %s";
+    if ($targetRole === 'super_admin' || $targetRole === 'admin') {
+        $roleCondition = "(role_target = %s OR role_target = 'admin' OR role_target = 'sales_department' OR role_target = 'seo_department')";
     }
-    else {
-        $notifIds = $wpdb->get_col(
-            $wpdb->prepare(
-            "SELECT id FROM $tn
-                 WHERE (user_id = %s AND (role_target IS NULL OR role_target = ''))
-                    OR role_target = 'admin'",
-            $userId
-        )
-        );
+    elseif ($targetRole === 'lead_manager') {
+        $roleCondition = "(role_target = %s OR role_target = 'sales_department')";
     }
+    elseif ($targetRole === 'seo_manager') {
+        $roleCondition = "(role_target = %s OR role_target = 'seo_department')";
+    }
+
+    $notifIds = $wpdb->get_col(
+        $wpdb->prepare(
+        "SELECT id FROM $tn
+             WHERE user_id = %s OR user_id = %s OR (role_target != '' AND $roleCondition)",
+        $userId,
+        $rawId,
+        $targetRole
+    )
+    );
 
     foreach ($notifIds as $nid) {
         $wpdb->query(
@@ -967,27 +954,31 @@ function crm_clear_notifications($request)
     if (!$userId)
         return ['status' => 'error', 'message' => 'userId required'];
 
+    $targetRole = $isSuperAdmin ? 'super_admin' : $userRole;
+    $rawId = preg_replace('/^(wp_|sa_)/', '', $userId);
+
+    $roleCondition = "role_target = %s";
+    if ($targetRole === 'super_admin' || $targetRole === 'admin') {
+        $roleCondition = "(role_target = %s OR role_target = 'admin' OR role_target = 'sales_department' OR role_target = 'seo_department')";
+    }
+    elseif ($targetRole === 'lead_manager') {
+        $roleCondition = "(role_target = %s OR role_target = 'sales_department')";
+    }
+    elseif ($targetRole === 'seo_manager') {
+        $roleCondition = "(role_target = %s OR role_target = 'seo_department')";
+    }
+
     // Instead of deleting, we find all notifications the user currently sees and DISMISS them.
     // This preserves the data for other users.
-    $query = "SELECT id FROM $tn ";
-    if ($isSuperAdmin) {
-        // Super admin sees everything
-        $notifIds = $wpdb->get_col($query);
-    }
-    elseif ($userRole === 'admin') {
-        // Admin sees own + admin broadcasts
-        $notifIds = $wpdb->get_col($wpdb->prepare(
-            "$query WHERE (user_id = %s AND (role_target IS NULL OR role_target = '')) OR role_target = 'admin'",
-            $userId
-        ));
-    }
-    else {
-        // Regular user sees only their assignments
-        $notifIds = $wpdb->get_col($wpdb->prepare(
-            "$query WHERE user_id = %s",
-            $userId
-        ));
-    }
+    $notifIds = $wpdb->get_col(
+        $wpdb->prepare(
+        "SELECT id FROM $tn
+             WHERE user_id = %s OR user_id = %s OR (role_target != '' AND $roleCondition)",
+        $userId,
+        $rawId,
+        $targetRole
+    )
+    );
 
     if (!empty($notifIds)) {
         foreach ($notifIds as $nid) {
