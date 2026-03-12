@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { activityLogsApi, profilesApi, bulkOperations, blogAssignmentsApi } from '@/db/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { notificationHelper } from '@/lib/notificationHelper';
+import { DataPagination } from '@/components/common/DataPagination';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -65,6 +66,7 @@ import {
   Tag as TagIcon,
   UserPlus,
   MoreVertical,
+  Eye,
 } from 'lucide-react';
 import { useWordPressApi } from '@/hooks/useWordPressApi';
 import { useSite } from '@/contexts/SiteContext';
@@ -155,6 +157,8 @@ export default function BlogsPage() {
   // Filters
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   const [formData, setFormData] = useState({
     title: '',
@@ -757,6 +761,11 @@ export default function BlogsPage() {
     return matchesStatus && matchesCategory;
   });
 
+  // Reset page to 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [statusFilter, categoryFilter]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -862,10 +871,6 @@ export default function BlogsPage() {
                   </SelectContent>
                 </Select>
               </div>
-
-              <span className="text-sm text-muted-foreground">
-                Showing {filteredBlogs.length} of {blogs.length} posts
-              </span>
             </div>
           </div>
         </CardHeader>
@@ -911,9 +916,15 @@ export default function BlogsPage() {
                 </TableHeader>
 
                 <TableBody >
-                  {filteredBlogs.map((blog) => (
-                    <TableRow key={blog.id} className="hover:bg-muted/50 transition-colors [&>td]:px-4">
-                      <TableCell className="py-3">
+                  {filteredBlogs
+                    .slice((currentPage - 1) * pageSize, currentPage * pageSize)
+                    .map((blog) => (
+                    <TableRow 
+                      key={blog.id} 
+                      className="hover:bg-muted/50 transition-colors [&>td]:px-4 cursor-pointer"
+                      onClick={() => navigate(`/blogs/view/${blog.id}`)}
+                    >
+                      <TableCell className="py-3" onClick={(e) => e.stopPropagation()}>
                         <Checkbox
                           checked={selectedBlogs.includes(blog.id)}
                           onCheckedChange={(checked) => handleSelectBlog(blog.id, checked as boolean)}
@@ -964,7 +975,7 @@ export default function BlogsPage() {
                           : '-'}
                       </TableCell>
 
-                      <TableCell className="py-3">
+                      <TableCell className="py-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex justify-center">
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
@@ -973,6 +984,10 @@ export default function BlogsPage() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => navigate(`/blogs/view/${blog.id}`)}>
+                                <Eye className="mr-2 h-4 w-4" />
+                                View Blog
+                              </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => navigate(`/blogs/${blog.id}`)}>
                                 <Edit className="mr-2 h-4 w-4" />
                                 Edit Blog
@@ -1016,6 +1031,21 @@ export default function BlogsPage() {
                   ))}
                 </TableBody>
               </Table>
+              {filteredBlogs.length > 0 && (
+                <div className="p-4 border-t">
+                  <DataPagination
+                    currentPage={currentPage}
+                    totalPages={Math.ceil(filteredBlogs.length / pageSize)}
+                    pageSize={pageSize}
+                    totalItems={filteredBlogs.length}
+                    onPageChange={setCurrentPage}
+                    onPageSizeChange={(size) => {
+                      setPageSize(size);
+                      setCurrentPage(1);
+                    }}
+                  />
+                </div>
+              )}
             </div>
           )}
         </CardContent>

@@ -6,6 +6,7 @@ import { useWordPressApi } from '@/hooks/useWordPressApi';
 import { useSite } from '@/contexts/SiteContext';
 import { notificationHelper } from '@/lib/notificationHelper';
 import { Checkbox } from '@/components/ui/checkbox';
+import { DataPagination } from '@/components/common/DataPagination';
 import type { SeoMetaTag, Profile } from '../types/types';
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -36,7 +37,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, Edit, UserPlus, Loader2, Trash2 } from 'lucide-react';
+import { Plus, Edit, UserPlus, Loader2, Trash2, MoreVertical, Eye } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -69,6 +70,7 @@ export default function SeoPage() {
   const [loading, setLoading] = useState(true);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [selectedTag, setSelectedTag] = useState<SeoMetaTag | null>(null);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [users, setUsers] = useState<Profile[]>([]);
@@ -77,6 +79,8 @@ export default function SeoPage() {
   const [saving, setSaving] = useState(false);
   const [isBulkAssigning, setIsBulkAssigning] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
   const { profile, hasPermission, getWpAuthHeader } = useAuth();
   const isAdmin = profile?.role === 'super_admin' || profile?.role === 'admin' || profile?.role === 'seo_manager';
@@ -195,6 +199,25 @@ export default function SeoPage() {
       toast({
         title: 'Permission Denied',
         description: 'You do not have permission to create SEO meta tags',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Validate required fields
+    if (!formDatanew.post_type.trim()) {
+      toast({
+        title: 'Validation Error',
+        description: 'Post Type is required',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!formDatanew.post_id.trim()) {
+      toast({
+        title: 'Validation Error',
+        description: 'Page/Post is required',
         variant: 'destructive',
       });
       return;
@@ -529,6 +552,11 @@ export default function SeoPage() {
     }
   };
 
+  const openViewDialog = (tag: SeoMetaTag) => {
+    setSelectedTag(tag);
+    setIsViewDialogOpen(true);
+  };
+
   const openEditDialog = (tag: SeoMetaTag) => {
     setSelectedTag(tag);
     setFormData({
@@ -667,7 +695,7 @@ export default function SeoPage() {
                 </DialogHeader>
                 <div className="space-y-4">
                   <div className="space-y-2">
-                    <Label>Post Type</Label>
+                    <Label>Post Type <span className="text-red-500">*</span></Label>
                     <Select
                       value={formDatanew.post_type}
                       onValueChange={(value) => {
@@ -680,6 +708,7 @@ export default function SeoPage() {
                           post_id: ""
                         })
                       }}
+                      required
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Select post type" />
@@ -696,13 +725,14 @@ export default function SeoPage() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label>Page / Post</Label>
+                    <Label>Page / Post <span className="text-red-500">*</span></Label>
                     <Select
                       value={formDatanew.post_id}
                       disabled={!formDatanew.post_type}
                       onValueChange={(value) =>
                         setFormDataNew({ ...formDatanew, post_id: value })
                       }
+                      required
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Select page or post" />
@@ -779,7 +809,7 @@ export default function SeoPage() {
         </div>
       </div>
 
-      <Card>
+      <Card className="hover:shadow-lg transition-shadow">
         <CardHeader>
           <CardTitle>All SEO Meta Tags</CardTitle>
           <CardDescription>Manage meta tags for different pages</CardDescription>
@@ -796,59 +826,132 @@ export default function SeoPage() {
                 </TableHead>
                 <TableHead>Page</TableHead>
                 <TableHead>Title</TableHead>
-                <TableHead>Keywords</TableHead>
-                <TableHead>Description</TableHead>
-                <TableHead>Assigned To</TableHead>
-                <TableHead>Updated</TableHead>
+                <TableHead className="hidden md:table-cell">Keywords</TableHead>
+                <TableHead className="hidden lg:table-cell">Description</TableHead>
+                <TableHead className="hidden lg:table-cell">Assigned To</TableHead>
+                <TableHead className="hidden xl:table-cell">Updated</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {tags.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground">
+                  <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
                     No SEO meta tags found
                   </TableCell>
                 </TableRow>
               ) : (
-                tags.map((tag) => (
-                  <TableRow key={tag.id}>
-                    <TableCell>
-                      <Checkbox
-                        checked={selectedTags.includes(tag.id)}
-                        onCheckedChange={(checked) => handleSelectTag(tag.id, checked as boolean)}
-                      />
-                    </TableCell>
-                    <TableCell className="font-medium">
-                      {tag.page_identifier}
-                    </TableCell>
-                    <TableCell>{tag.title}</TableCell>
-                    <TableCell className="max-w-xs truncate">{tag.keywords || '-'}</TableCell>
-                    <TableCell className="max-w-xs truncate">{tag.description || '-'}</TableCell>
-                    <TableCell>
-                      {users.find(u => u.id === tag.assigned_to)?.username || 'Unassigned'}
-                    </TableCell>
-                    <TableCell>{new Date(tag.updated_at).toLocaleDateString()}</TableCell>
-                    <TableCell>
-                      <div className="flex gap-2">
+                tags
+                  .slice((currentPage - 1) * pageSize, currentPage * pageSize)
+                  .map((tag) => (
+                    <TableRow 
+                      key={tag.id} 
+                      className="hover:bg-muted/50 transition-colors cursor-pointer"
+                      onClick={() => openViewDialog(tag)}
+                    >
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <Checkbox
+                          checked={selectedTags.includes(tag.id)}
+                          onCheckedChange={(checked) => handleSelectTag(tag.id, checked as boolean)}
+                        />
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        {tag.page_identifier}
+                      </TableCell>
+                      <TableCell className="max-w-[200px] truncate text-foreground text-sm">{tag.title}</TableCell>
+                      <TableCell className="hidden md:table-cell text-foreground text-sm">{tag.keywords || '-'}</TableCell>
+                      <TableCell className="hidden lg:table-cell max-w-[200px] truncate text-foreground text-sm">{tag.description || '-'}</TableCell>
+                      <TableCell className="hidden lg:table-cell text-foreground text-sm">
+                        {users.find(u => u.id === tag.assigned_to)?.username || 'Unassigned'}
+                      </TableCell>
+                      <TableCell className="hidden xl:table-cell text-foreground text-sm">{new Date(tag.updated_at).toLocaleDateString()}</TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
                         {hasPermission('seo_meta_tags', 'write') && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => openEditDialog(tag)}
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" className="h-8 w-8 p-0">
+                                <span className="sr-only">Open menu</span>
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => openViewDialog(tag)}>
+                                <Eye className="mr-2 h-4 w-4" />
+                                View
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => openEditDialog(tag)}>
+                                <Edit className="mr-2 h-4 w-4" />
+                                Edit
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => handleDelete(tag)}
+                                className="text-destructive"
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
+                      </TableCell>
+                    </TableRow>
+                  ))
               )}
             </TableBody>
           </Table>
+          {tags.length > 0 && (
+            <DataPagination
+              currentPage={currentPage}
+              totalPages={Math.ceil(tags.length / pageSize)}
+              pageSize={pageSize}
+              totalItems={tags.length}
+              onPageChange={setCurrentPage}
+              onPageSizeChange={(size) => {
+                setPageSize(size);
+                setCurrentPage(1);
+              }}
+            />
+          )}
         </CardContent>
       </Card>
+
+      <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>View SEO Meta Tag</DialogTitle>
+            <DialogDescription>Details for {selectedTag?.page_identifier}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Page / Post</Label>
+              <div className="p-2 bg-muted rounded-md text-sm">{selectedTag?.page_identifier || '-'}</div>
+            </div>
+            <div className="space-y-2">
+              <Label>Title</Label>
+              <div className="p-2 bg-muted rounded-md text-sm">{selectedTag?.title || '-'}</div>
+            </div>
+            <div className="space-y-2">
+              <Label>Keywords</Label>
+              <div className="p-2 bg-muted rounded-md text-sm">{selectedTag?.keywords || '-'}</div>
+            </div>
+            <div className="space-y-2">
+              <Label>Description</Label>
+              <div className="p-2 text-sm bg-muted rounded-md min-h-[60px] whitespace-pre-wrap">{selectedTag?.description || '-'}</div>
+            </div>
+            <div className="space-y-2">
+              <Label>Assigned To</Label>
+              <div className="p-2 bg-muted rounded-md text-sm">
+                {users.find(u => u.id === selectedTag?.assigned_to)?.username || 'Unassigned'}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
         <DialogContent>
