@@ -143,8 +143,17 @@ export function createWordPressApi(wpBaseUrl: string, authHeader: Record<string,
       const res = await fetch(`${WP_BASE_URL}/posts/${id}?_embed&_=${Date.now()}`, {
         headers: AUTH_HEADER,
       });
-      if (!res.ok) throw new Error('Failed to fetch post');
-      return res.json();
+      const text = await res.text();
+      if (!res.ok) {
+        console.error(`[wordpressApi] getPost failed (${res.status}):`, text.substring(0, 500));
+        throw new Error(`Failed to fetch post: ${res.status}`);
+      }
+      try {
+        return JSON.parse(text);
+      } catch (e: any) {
+        console.error('[wordpressApi] JSON parse failed for getPost. Response:', text.substring(0, 500));
+        throw new Error(`Failed to parse post JSON: ${e.message}`);
+      }
     },
 
     async createPost(data: WordPressPost) {
@@ -154,11 +163,16 @@ export function createWordPressApi(wpBaseUrl: string, authHeader: Record<string,
         body: JSON.stringify(data),
       });
 
+      const text = await res.text();
       if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || 'Failed to create post');
+        try {
+          const error = JSON.parse(text);
+          throw new Error(error.message || 'Failed to create post');
+        } catch {
+          throw new Error(`Failed to create post: ${res.status} ${text.substring(0, 100)}`);
+        }
       }
-      return res.json();
+      return JSON.parse(text);
     },
 
     async updatePost(id: number, data: Partial<WordPressPost>) {
@@ -168,11 +182,16 @@ export function createWordPressApi(wpBaseUrl: string, authHeader: Record<string,
         body: JSON.stringify(data),
       });
 
+      const text = await res.text();
       if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || 'Failed to update post');
+        try {
+          const error = JSON.parse(text);
+          throw new Error(error.message || 'Failed to update post');
+        } catch {
+          throw new Error(`Failed to update post: ${res.status} ${text.substring(0, 100)}`);
+        }
       }
-      return res.json();
+      return JSON.parse(text);
     },
 
     async deletePost(id: number, force: boolean = false) {
@@ -230,8 +249,13 @@ export function createWordPressApi(wpBaseUrl: string, authHeader: Record<string,
         body: formData,
       });
 
+      const text = await res.text();
       if (!res.ok) {
-        const errorData = await res.json().catch(() => null);
+        let errorData = null;
+        try {
+          errorData = JSON.parse(text);
+        } catch { }
+
         if (errorData?.code === 'rest_upload_image_error') {
           const err: any = new Error(errorData.message || 'Image processing failed');
           err.code = 'rest_upload_image_error';
@@ -243,10 +267,10 @@ export function createWordPressApi(wpBaseUrl: string, authHeader: Record<string,
         if (errorData?.code === 'rest_upload_user_quota_exceeded') {
           throw new Error('Upload quota exceeded. Please contact administrator.');
         }
-        throw new Error(errorData?.message || 'Failed to upload media');
+        throw new Error(errorData?.message || `Failed to upload media: ${res.status} ${text.substring(0, 100)}`);
       }
 
-      const media = await res.json();
+      const media = JSON.parse(text);
       return { id: media.id, url: media.source_url };
     },
 
@@ -371,11 +395,16 @@ export function createWordPressApi(wpBaseUrl: string, authHeader: Record<string,
       if (reassignId) url += `&reassign=${reassignId}`;
 
       const res = await fetch(url, { method: 'DELETE', headers: AUTH_HEADER });
+      const text = await res.text();
       if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || 'Failed to delete user');
+        try {
+          const error = JSON.parse(text);
+          throw new Error(error.message || 'Failed to delete user');
+        } catch {
+          throw new Error(`Failed to delete user: ${res.status} ${text.substring(0, 100)}`);
+        }
       }
-      return res.json();
+      return JSON.parse(text);
     },
 
     // ── Custom endpoints (crm/v1) ─────────────────────────
@@ -401,8 +430,8 @@ export function createWordPressApi(wpBaseUrl: string, authHeader: Record<string,
         headers: customHeaders || AUTH_HEADER,
       });
 
+      const text = await res.text();
       if (!res.ok) {
-        const text = await res.text().catch(() => '');
         console.error('Fetch Activity Logs Error:', {
           status: res.status,
           url: res.url,
@@ -411,7 +440,15 @@ export function createWordPressApi(wpBaseUrl: string, authHeader: Record<string,
         if (res.status === 403) throw new Error('You do not have permission to view logs');
         throw new Error(`Failed to fetch logs: ${res.status} ${res.statusText}`);
       }
-      const data = await res.json();
+      
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e: any) {
+        console.error('[wordpressApi] JSON parse failed for getActivityLogs. Response:', text.substring(0, 500));
+        throw new Error(`Failed to parse logs JSON: ${e.message}`);
+      }
+
       // Handle both new paginated shape { logs, total, page, perPage } and legacy plain array
       if (Array.isArray(data)) {
         console.log('✅ WordPress API Response (legacy array):', { count: data.length });
@@ -426,11 +463,15 @@ export function createWordPressApi(wpBaseUrl: string, authHeader: Record<string,
       const res = await fetch(`${WP_JSON_BASE}/crm/v1/ip-whitelist`, {
         headers: customHeaders || AUTH_HEADER,
       });
+      const text = await res.text();
       if (!res.ok) {
-        const body = await res.text().catch(() => '');
-        throw new Error(`IP whitelist fetch failed (HTTP ${res.status}): ${body.slice(0, 120)}`);
+        throw new Error(`IP whitelist fetch failed (HTTP ${res.status}): ${text.slice(0, 120)}`);
       }
-      return res.json() as Promise<any[]>;
+      try {
+        return JSON.parse(text) as any[];
+      } catch (e: any) {
+        throw new Error(`Failed to parse IP whitelist JSON: ${e.message}`);
+      }
     },
 
     async addIPWhitelist(entry: {
@@ -450,11 +491,15 @@ export function createWordPressApi(wpBaseUrl: string, authHeader: Record<string,
         },
         body: JSON.stringify(entry),
       });
+      const text = await res.text();
       if (!res.ok) {
-        const body = await res.text().catch(() => '');
-        throw new Error(`Failed to add IP (HTTP ${res.status}): ${body.slice(0, 120)}`);
+        throw new Error(`Failed to add IP (HTTP ${res.status}): ${text.slice(0, 120)}`);
       }
-      return res.json();
+      try {
+        return JSON.parse(text);
+      } catch (e: any) {
+        throw new Error(`Failed to parse response: ${e.message}`);
+      }
     },
 
     async deleteIPWhitelist(id: string, customHeaders?: Record<string, string>) {
@@ -469,14 +514,16 @@ export function createWordPressApi(wpBaseUrl: string, authHeader: Record<string,
     // ── Post Types (for SEO page) ─────────────────────────
     async getPostTypes() {
       const res = await fetch(`${WP_BASE_URL}/types`);
-      if (!res.ok) throw new Error('Failed to fetch post types');
-      return res.json();
+      const text = await res.text();
+      if (!res.ok) throw new Error(`Failed to fetch post types: ${res.status}`);
+      return JSON.parse(text);
     },
 
     async getPostsByType(restBase: string) {
       const res = await fetch(`${WP_BASE_URL}/${restBase}?per_page=100`);
-      if (!res.ok) throw new Error('Failed to fetch posts by type');
-      return res.json();
+      const text = await res.text();
+      if (!res.ok) throw new Error(`Failed to fetch posts by type: ${res.status}`);
+      return JSON.parse(text);
     },
 
     /** Expose the base url for niche usage */
