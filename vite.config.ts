@@ -23,6 +23,12 @@ export default defineConfig({
         target: 'http://localhost:3001',
         changeOrigin: true,
       },
+      // Local WordPress proxy (Vite handles CORS)
+      '/wp-api': {
+        target: 'http://localhost', 
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/wp-api/, '/wp-json/crm/v1'),
+      },
     },
   },
 });

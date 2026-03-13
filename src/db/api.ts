@@ -32,12 +32,14 @@ export const seoMetaTagsApi = {
         if (base) {
             try {
                 const res = await fetch(`${base}/seo-meta?api_key=${this._getKey()}&_=${Date.now()}`);
+                const text = await res.text();
                 if (res.ok) {
-                    const data = await res.json();
+                    const data = JSON.parse(text);
                     // Keep a local copy as cache for offline/fallback use
                     setLS('crm_seo_meta', data);
                     return data;
                 }
+                console.warn('[seoMetaTagsApi] Fetch failed:', text.substring(0, 500));
             } catch (e) {
                 console.warn('[seoMetaTagsApi] WP API unavailable, using localStorage fallback', e);
             }
@@ -245,11 +247,13 @@ export const notesApi = {
         if (wp) {
             try {
                 const res = await fetch(`${wp.base}/leads/${leadId}/notes?api_key=${wp.key}&_=${Date.now()}`);
+                const text = await res.text();
                 if (res.ok) {
-                    const data = await res.json();
+                    const data = JSON.parse(text);
                     setLS(`crm_notes_${leadId}`, data);
                     return data;
                 }
+                console.warn(`[notesApi] Fetch failed (${res.status}):`, text.substring(0, 500));
             } catch (e) {
                 console.warn('[notesApi] WP unavailable, using localStorage', e);
             }
@@ -320,11 +324,13 @@ export const followUpsApi = {
         if (wp) {
             try {
                 const res = await fetch(`${wp.base}/leads/${leadId}/followups?api_key=${wp.key}&_=${Date.now()}`);
+                const text = await res.text();
                 if (res.ok) {
-                    const data = await res.json();
+                    const data = JSON.parse(text);
                     setLS(`crm_followups_${leadId}`, data);
                     return data;
                 }
+                console.warn(`[followUpsApi] Fetch failed (${res.status}):`, text.substring(0, 500));
             } catch (e) {
                 console.warn('[followUpsApi] WP unavailable, using localStorage', e);
             }
@@ -441,14 +447,18 @@ export const blogAssignmentsApi = {
         if (base) {
             try {
                 const res = await fetch(`${base}/blog-assignments?api_key=${this._getKey()}&_=${Date.now()}`);
+                const text = await res.text();
                 if (res.ok) {
-                    const rows: Array<{ post_id: string; assigned_to: string | null }> = await res.json();
+                    const rows: Array<{ post_id: string; assigned_to: string | null }> = JSON.parse(text);
                     const map: Record<string, string | null> = {};
                     rows.forEach(r => { map[r.post_id] = r.assigned_to || null; });
                     this._setLocal(map);
                     return map;
                 }
-            } catch { }
+                console.warn(`[blogAssignmentsApi] Fetch failed (${res.status}):`, text.substring(0, 500));
+            } catch (e) {
+                console.warn('[blogAssignmentsApi] Error:', e);
+            }
         }
         return this._getLocal();
     },
@@ -607,7 +617,7 @@ export const chatApi = {
 
 // Notifications API (WordPress-based)
 export const notificationsApi = {
-    async getAll(userId: string, siteId?: string, isSuperAdmin: boolean = false, userRole: string = '') {
+    async getAll(userId: string, _siteId?: string, isSuperAdmin: boolean = false, userRole: string = '') {
         const site = getCurrentSiteFromCache();
         if (!site?.url) return [];
 
@@ -616,9 +626,34 @@ export const notificationsApi = {
         const apiBaseUrl = `${url}/crm/v1`;
         const apiKey = import.meta.env.VITE_WP_API_KEY;
 
-        const res = await fetch(`${apiBaseUrl}/notifications?userId=${userId}&isSuperAdmin=${isSuperAdmin}&userRole=${userRole}&api_key=${apiKey}`);
-        if (!res.ok) throw new Error('Failed to fetch notifications');
-        return res.json();
+        const res = await fetch(`${apiBaseUrl}/notifications?userId=${userId}&isSuperAdmin=${isSuperAdmin}&userRole=${userRole}&api_key=${apiKey}`).catch(() => null);
+        
+        if (!res) {
+            if (apiBaseUrl.includes('/wp-api')) return [];
+            throw new Error('Network error fetching notifications');
+        }
+
+        const text = await res.text();
+        if (!res.ok) {
+            console.error(`[notificationsApi] Fetch failed (${res.status}):`, text.substring(0, 500));
+            // If 404 on the fallback path, just return empty
+            if (res.status === 404 && apiBaseUrl.includes('/wp-api')) {
+                return [];
+            }
+            throw new Error(`Failed to fetch notifications: ${res.status}`);
+        }
+        
+        try {
+            return JSON.parse(text);
+        } catch (e: any) {
+            console.error('[notificationsApi] JSON parse failed. Response was:', text.substring(0, 1000));
+            // If hitting the fallback path and getting HTML, return empty instead of throwing
+            if (apiBaseUrl.includes('/wp-api')) {
+                console.warn('[notificationsApi] Returning empty array due to unconfigured local endpoint.');
+                return [];
+            }
+            throw new Error(`Failed to parse notifications JSON: ${e.message}`);
+        }
     },
     async create(data: any) {
         const site = getCurrentSiteFromCache();

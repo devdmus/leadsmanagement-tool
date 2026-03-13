@@ -28,26 +28,41 @@ add_filter('rest_pre_dispatch', function ($result, $server, $request) {
  * Handle CORS for custom endpoints
  */
 add_action('init', function () {
-    header("Access-Control-Allow-Origin: *");
-    header("Access-Control-Allow-Methods: POST, GET, OPTIONS, PUT, DELETE, PATCH");
-    header("Access-Control-Allow-Headers: Authorization, Content-Type, x-crm-api-key");
+    if (!headers_sent()) {
+        header("Access-Control-Allow-Origin: *");
+        header("Access-Control-Allow-Methods: POST, GET, OPTIONS, PUT, DELETE, PATCH");
+        header("Access-Control-Allow-Headers: Authorization, Content-Type, x-crm-api-key");
+    }
     if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
         status_header(200);
         exit;
     }
-});
+}, 1);
 
 add_action('rest_api_init', function () {
-    remove_filter('rest_pre_serve_request', 'rest_send_cors_headers');
-    add_filter('rest_pre_serve_request', function ($value) {
-            header('Access-Control-Allow-Origin: *');
-            header('Access-Control-Allow-Methods: GET, POST, OPTIONS, DELETE, PUT, PATCH');
-            header('Access-Control-Allow-Credentials: true');
-            header('Access-Control-Allow-Headers: Authorization, Content-Type, x-crm-api-key');
-            return $value;
+    // Force allow all origins for REST API
+    add_filter('rest_allowed_origins', function() {
+        return ['*'];
+    });
+
+    // Specifically allow our custom header
+    add_filter('rest_allowed_headers', function($headers) {
+        if (!in_array('x-crm-api-key', $headers)) {
+            $headers[] = 'x-crm-api-key';
         }
-        );
+        return $headers;
+    });
+
+    // Final catch-all for headers
+    add_filter('rest_pre_serve_request', function ($value) {
+        header('Access-Control-Allow-Origin: *');
+        header('Access-Control-Allow-Methods: GET, POST, OPTIONS, DELETE, PUT, PATCH');
+        header('Access-Control-Allow-Credentials: true');
+        header('Access-Control-Allow-Headers: Authorization, Content-Type, x-crm-api-key');
+        header('Access-Control-Expose-Headers: Content-Type, Authorization, x-crm-api-key');
+        return $value;
     }, 15);
+}, 15);
 
 /**
  * Create the custom tables
