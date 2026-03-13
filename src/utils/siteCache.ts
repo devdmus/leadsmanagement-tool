@@ -17,8 +17,22 @@ export type CachedSite = {
     assignedAdmins?: string[];
 };
 
+// ── Synchronous Initialization from localStorage ────────────────
+const SAVED_SITES_KEY = 'crm_wp_sites';
+const CURRENT_SITE_KEY = 'crm_current_site_id';
+
 let _sites: CachedSite[] = [];
 let _currentSiteId: string | null = null;
+
+try {
+    const savedSites = localStorage.getItem(SAVED_SITES_KEY);
+    if (savedSites) {
+        _sites = JSON.parse(savedSites);
+    }
+    _currentSiteId = localStorage.getItem(CURRENT_SITE_KEY);
+} catch (e) {
+    console.warn('[siteCache] Failed to initialize from localStorage:', e);
+}
 
 /** Called by SiteContext whenever sites are fetched from the DB. */
 export function setSiteCache(sites: CachedSite[], currentSiteId: string | null) {

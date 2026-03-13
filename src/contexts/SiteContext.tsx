@@ -50,12 +50,35 @@ function mapRow(row: any): WordPressSite {
 }
 
 export function SiteProvider({ children }: { children: ReactNode }) {
-    const [sites, setSites] = useState<WordPressSite[]>([]);
-    const [currentSite, setCurrentSiteState] = useState<WordPressSite | null>(null);
+    const [sites, setSites] = useState<WordPressSite[]>(() => {
+        try {
+            const saved = localStorage.getItem('crm_wp_sites');
+            if (saved) return JSON.parse(saved);
+        } catch (e) {
+            console.warn('[SiteContext] Failed to load sites from localStorage:', e);
+        }
+        return [];
+    });
+    const [currentSite, setCurrentSiteState] = useState<WordPressSite | null>(() => {
+        try {
+            const savedId = localStorage.getItem(CURRENT_SITE_KEY);
+            const savedSites = localStorage.getItem('crm_wp_sites');
+            if (savedId && savedSites) {
+                const loaded = JSON.parse(savedSites);
+                return loaded.find((s: any) => s.id === savedId) || loaded[0] || null;
+            }
+        } catch (e) {
+             console.warn('[SiteContext] Failed to restore current site from localStorage:', e);
+        }
+        return null;
+    });
 
     // ── Sync siteCache whenever sites or currentSite changes ────────────────
     useEffect(() => {
         setSiteCache(sites, currentSite?.id ?? null);
+        if (sites.length > 0) {
+            localStorage.setItem('crm_wp_sites', JSON.stringify(sites));
+        }
     }, [sites, currentSite]);
 
     // ── Load sites from DB on mount ──────────────────────────────────────────

@@ -18,12 +18,15 @@ function getApiBase(): string {
     if (site?.url) {
       let url = site.url.replace(/\/$/, '');
       if (!url.includes('/wp-json')) url += '/wp-json';
-      return url + '/crm/v1';
+      const finalUrl = url + '/crm/v1';
+      console.log(`📡 [wpLeadsApi] Using site API: ${finalUrl} (Site: ${site.name})`);
+      return finalUrl;
     }
-  } catch {
-    // fall through
+  } catch (e) {
+    console.warn('[wpLeadsApi] Cache error:', e);
   }
-  // Fallback to env variable if no site selected
+  
+  console.log(`🏠 [wpLeadsApi] Using fallback API: ${ENV_API_BASE}`);
   return ENV_API_BASE || '';
 }
 
@@ -46,15 +49,40 @@ export const wpLeadsApi = {
     const API_KEY = getApiKey();
 
     // Use query param instead of header to avoid CORS preflight issues with custom headers
-    const res = await fetch(`${API_BASE}/leads?api_key=${API_KEY}&_=${Date.now()}`, {
-      // No custom headers needed
+    const res = await fetch(`${API_BASE}/leads?api_key=${API_KEY}&_=${Date.now()}`).catch(err => {
+      console.warn(`[wpLeadsApi] Network error for ${API_BASE}/leads:`, err.message);
+      return null;
     });
 
-    if (!res.ok) {
-      throw new Error('Failed to fetch leads: ' + res.status);
+    if (!res) {
+      if (API_BASE === '/wp-api' || API_BASE === ENV_API_BASE) return [];
+      throw new Error('Network error fetching leads');
     }
 
-    const remoteLeads = await res.json();
+    const text = await res.text();
+    if (!res.ok) {
+      console.error(`[wpLeadsApi] Fetch failed (${res.status}). Response:`, text.substring(0, 500));
+      // If 404 on the fallback path, just return empty instead of crashing
+      if (res.status === 404 && (API_BASE === '/wp-api' || API_BASE === ENV_API_BASE)) {
+        console.warn('[wpLeadsApi] 404 on local fallback. Returning empty array.');
+        return [];
+      }
+      throw new Error(`Failed to fetch leads: ${res.status}`);
+    }
+
+    let remoteLeads;
+    try {
+      remoteLeads = JSON.parse(text);
+    } catch (e: any) {
+      console.log(`[wpLeadsApi] Error parsing JSON from ${API_BASE}/leads. RAW RESPONSE:`, text.substring(0, 500));
+      // If we're using the fallback /wp-api and it's returning HTML (likely Vite SPA fallback),
+      // just return an empty array instead of crashing the dashboard.
+      if (API_BASE === '/wp-api' || API_BASE === ENV_API_BASE) {
+        console.warn('[wpLeadsApi] JSON parse error on fallback. Returning empty array.');
+        return [];
+      }
+      throw new Error(`Failed to parse leads JSON: ${e.message}`);
+    }
     console.log(`[wpLeadsApi] Fetched ${remoteLeads.length} leads from ${API_BASE}`);
 
     const localUpdates = getLocalUpdates();
