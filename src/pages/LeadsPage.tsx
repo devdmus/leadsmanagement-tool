@@ -168,6 +168,9 @@ export default function LeadsPage() {
     if (!newLead.name.trim()) {
       errors.name = 'Name is required';
       hasError = true;
+    } else if (newLead.name.trim().length < 2 || newLead.name.trim().length > 50) {
+      errors.name = 'Name must contain 2 to 50 characters';
+      hasError = true;
     }
 
     if (!newLead.email.trim()) {
@@ -218,6 +221,11 @@ export default function LeadsPage() {
 
     if (hasError) {
       setFormErrors(errors);
+      toast({
+        title: 'Validation Error',
+        description: errors.name || errors.email || errors.phone,
+        variant: 'destructive',
+      });
       return;
     }
 
@@ -405,16 +413,16 @@ export default function LeadsPage() {
         </CardHeader>
 
         <CardContent>
-          <Table>
+          <Table className="w-full">
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead className="hidden md:table-cell">Phone</TableHead>
-                <TableHead>Source</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead />
+                <TableHead className="w-[220px]">Name</TableHead>
+                <TableHead className="min-w-[200px]">Email</TableHead>
+                <TableHead className="hidden md:table-cell w-[140px]">Phone</TableHead>
+                <TableHead className="w-[100px]">Source</TableHead>
+                <TableHead className="w-[110px]">Status</TableHead>
+                <TableHead className="w-[120px]">Created</TableHead>
+                <TableHead className="w-[60px] text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
 
@@ -428,15 +436,17 @@ export default function LeadsPage() {
               ) : (
                 filteredLeads.map(lead => (
                   <TableRow key={lead.id}>
-                    <TableCell>{lead.name}</TableCell>
-                    <TableCell className="max-w-[200px] truncate">{lead.email}</TableCell>
+                    <TableCell className="font-medium truncate " title={lead.name}>
+                      {lead.name.length > 20 ? `${lead.name.substring(0, 20)}...` : lead.name}
+                    </TableCell>
+                    <TableCell className="max-w-[170px] truncate">{lead.email}</TableCell>
                     <TableCell className="hidden md:table-cell">{lead.phone ?? '-'}</TableCell>
                     <TableCell>{getSourceBadge(lead.source)}</TableCell>
                     <TableCell>{getStatusBadge(lead.status)}</TableCell>
                     <TableCell>
                       {new Date(lead.created_at).toLocaleDateString()}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="text-right">
                       <Button
                         size="sm"
                         variant="ghost"

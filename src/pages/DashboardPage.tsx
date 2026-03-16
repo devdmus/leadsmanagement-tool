@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { wpLeadsApi } from '@/db/wpLeadsApi';
 import { followUpsApi } from '@/db/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Users, UserRoundCheck, TriangleAlert, BellRing, Clock, ShieldOff } from 'lucide-react';
+import { Users, UserRoundCheck, TriangleAlert, BellRing, Clock, ShieldOff, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useSite } from '@/contexts/SiteContext';
 import { Badge } from '@/components/ui/badge';
@@ -30,6 +30,7 @@ export default function DashboardPage() {
   } | null>(null);
   const [dueFollowUps, setDueFollowUps] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [sliderIndex, setSliderIndex] = useState(0);
 
   useEffect(() => {
     setLoading(true);
@@ -39,8 +40,20 @@ export default function DashboardPage() {
 
   const loadFollowUps = async () => {
     try {
-      const due = await followUpsApi.getDue(currentSite?.id);
-      setDueFollowUps(due);
+      const [due, allLeads] = await Promise.all([
+        followUpsApi.getDue(currentSite?.id),
+        wpLeadsApi.getAll()
+      ]);
+
+      const leadsMap = new Map(allLeads.map((l: any) => [l.id.toString(), l.name]));
+      const filtered = due
+        .filter(fu => leadsMap.has(fu.lead_id?.toString()))
+        .map(fu => ({
+          ...fu,
+          leadName: leadsMap.get(fu.lead_id?.toString()) || `Lead ${fu.lead_id}`
+        }));
+
+      setDueFollowUps(filtered);
     } catch (error) {
       console.error('Failed to load due follow-ups:', error);
     }
@@ -225,7 +238,7 @@ export default function DashboardPage() {
       </div>
 
       {dueFollowUps.length > 0 && (
-        <Card className="border-info/50 bg-info/5">
+        <Card className="border-info/50 bg-info/5 overflow-hidden group">
           <CardHeader className="pb-3">
             <div className="flex items-center gap-2">
               <BellRing className="h-5 w-5 text-info animate-bounce" />
@@ -233,28 +246,74 @@ export default function DashboardPage() {
             </div>
             <CardDescription>Scheduled tasks that need attention right now</CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {dueFollowUps.slice(0, 6).map((fu) => (
-                <div key={fu.id} className="flex items-center justify-between p-3 border rounded-lg bg-background hover:border-info transition-colors">
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium leading-none">Lead ID: {fu.lead_id}</p>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Clock className="h-3 w-3" />
-                      <span>{new Date(fu.follow_up_date).toLocaleString()}</span>
-                      <Badge variant="outline" className="text-[10px] py-0">{fu.type}</Badge>
+          <CardContent className="px-12">
+            <div className="relative">
+              {/* Navigation Arrows */}
+              {sliderIndex > 0 && (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="absolute -left-10 top-1/2 -translate-y-1/2 z-10 h-8 w-8 rounded-full bg-background/80 backdrop-blur-sm shadow-sm md:shadow-md border-muted group-hover:border-info/50 opacity-0 group-hover:opacity-100 transition-all duration-300 hover:scale-110 active:scale-95"
+                  onClick={() => setSliderIndex(prev => Math.max(0, prev - 1))}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+              )}
+
+              {sliderIndex < dueFollowUps.length - 3 && (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="absolute -right-10 top-1/2 -translate-y-1/2 z-10 h-8 w-8 rounded-full bg-background/80 backdrop-blur-sm shadow-sm md:shadow-md border-muted group-hover:border-info/50 opacity-0 group-hover:opacity-100 transition-all duration-300 hover:scale-110 active:scale-95"
+                  onClick={() => setSliderIndex(prev => Math.min(dueFollowUps.length - 3, prev + 1))}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              )}
+
+              <div className="flex gap-4 transition-all duration-300 ease-in-out">
+                {dueFollowUps.slice(sliderIndex, sliderIndex + 3).map((fu) => (
+                  <div
+                    key={fu.id}
+                    className="flex-1 min-w-0 flex items-center justify-between p-4 border rounded-xl bg-background hover:border-info hover:shadow-md transition-all animate-in fade-in slide-in-from-right-4 duration-500"
+                  >
+                    <div className="space-y-2 overflow-hidden">
+                      <div className="flex items-center gap-2">
+                        <div className="h-2 w-2 rounded-full bg-info animate-pulse" />
+                        <p className="text-sm font-semibold leading-none truncate capitalize">{fu.leadName}</p>
+                      </div>
+                      <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                        <div className="flex items-center gap-1.5 font-medium">
+                          <Clock className="h-3.5 w-3.5 text-info" />
+                          <span>{new Date(fu.follow_up_date).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="secondary" className="text-[10px] py-0 px-1.5 h-4 uppercase font-bold tracking-wider">{fu.type}</Badge>
+                          <span className="text-[10px] font-medium opacity-70">
+                            {new Date(fu.follow_up_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                      </div>
                     </div>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="ml-2 px-3 py-1.5 h-auto rounded-lg bg-info/10 hover:bg-info/20 text-info text-xs font-bold transition-colors"
+                      onClick={() => navigate(`/leads/${fu.lead_id}`)}
+                    >
+                      View
+                    </Button>
                   </div>
-                  <Button size="sm" variant="ghost" onClick={() => navigate(`/leads/${fu.lead_id}`)}>
-                    View
-                  </Button>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-            {dueFollowUps.length > 6 && (
-              <p className="text-xs text-center text-muted-foreground mt-4">
-                And {dueFollowUps.length - 6} more follow-ups due...
-              </p>
+
+            {dueFollowUps.length > 3 && (
+              <div className="flex justify-center mt-5">
+                <div className="px-3 py-1 rounded-full bg-info/5 border border-info/10 text-[10px] font-bold text-info tracking-widest uppercase">
+                  {sliderIndex + 1} / {dueFollowUps.length - 2}
+                </div>
+              </div>
             )}
           </CardContent>
         </Card>
