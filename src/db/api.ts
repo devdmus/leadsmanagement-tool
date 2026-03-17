@@ -8,8 +8,21 @@ const genId = () => Math.random().toString(36).substr(2, 9);
 const getLS = (key: string) => JSON.parse(localStorage.getItem(key) || '[]');
 const setLS = (key: string, data: any) => localStorage.setItem(key, JSON.stringify(data));
 
-// Leads API (Pointing to wpLeadsApi)
-export const leadsApi = wpLeadsApi;
+// Cleanup helper for lead-related data
+const cleanupLeadData = (leadId: string) => {
+    localStorage.removeItem(`crm_notes_${leadId}`);
+    localStorage.removeItem(`crm_followups_${leadId}`);
+};
+
+// Leads API (Pointing to wpLeadsApi with cleanup)
+export const leadsApi = {
+    ...wpLeadsApi,
+    async delete(id: string) {
+        const res = await wpLeadsApi.delete(id);
+        cleanupLeadData(id);
+        return res;
+    }
+};
 
 // SEO Meta Tags API — uses WordPress REST API (server-side storage shared across all users)
 // Falls back to localStorage if the WP endpoint is unavailable.
@@ -578,6 +591,7 @@ export const bulkOperations = {
         if (table === 'leads') {
             for (const id of ids) {
                 await wpLeadsApi.delete(id);
+                cleanupLeadData(id);
             }
         } else {
             const dbKey = `crm_${table}`;

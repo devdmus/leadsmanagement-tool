@@ -132,6 +132,8 @@ export default function LeadsPageEnhanced() {
   const [formErrors, setFormErrors] = useState({ name: '', email: '', phone: '' });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [leadToDelete, setLeadToDelete] = useState<string | null>(null);
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
   const [newLead, setNewLead] = useState({
     name: '',
@@ -339,6 +341,9 @@ export default function LeadsPageEnhanced() {
     if (!newLead.name.trim()) {
       errors.name = 'Name is required';
       hasError = true;
+    } else if (newLead.name.trim().length < 2 || newLead.name.trim().length > 50) {
+      errors.name = 'Name must contain 2 to 50 characters';
+      hasError = true;
     }
 
     if (!newLead.email.trim()) {
@@ -393,6 +398,11 @@ export default function LeadsPageEnhanced() {
 
     if (hasError) {
       setFormErrors(errors);
+      toast({
+        title: 'Validation Error',
+        description: errors.name || errors.email || errors.phone,
+        variant: 'destructive',
+      });
       return;
     }
 
@@ -476,6 +486,43 @@ export default function LeadsPageEnhanced() {
       });
     } finally {
       setIsBulkEditing(false);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedLeads.length === 0) return;
+
+    setIsBulkDeleting(true);
+    try {
+      await bulkOperations.bulkDelete('leads', selectedLeads);
+
+      if (profile) {
+        await activityLogsApi.create({
+          user_id: profile.id as string,
+          action: 'bulk_delete_leads',
+          resource_type: 'lead',
+          resource_id: null,
+          details: { count: selectedLeads.length, lead_ids: selectedLeads },
+        });
+      }
+
+      toast({
+        title: 'Success',
+        description: `Deleted ${selectedLeads.length} leads successfully`,
+      });
+
+      setShowBulkDeleteConfirm(false);
+      setSelectedLeads([]);
+      loadLeads();
+    } catch (error) {
+      console.error('Failed to bulk delete:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to delete leads',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsBulkDeleting(false);
     }
   };
 
@@ -845,12 +892,31 @@ export default function LeadsPageEnhanced() {
               </Button>
             </>
           )}
-          {/* Bulk Edit — any user with leads write permission */}
+          {/* Bulk Actions — any user with leads write permission */}
           {hasPermission('leads', 'write') && selectedLeads.length > 0 && (
-            <Button variant="outline" onClick={() => setShowBulkEditDialog(true)}>
-              <Edit className="h-4 w-4 mr-2" />
-              Bulk Edit ({selectedLeads.length})
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline">
+                  <Edit className="h-4 w-4 mr-2" />
+                  Bulk Actions ({selectedLeads.length})
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setShowBulkEditDialog(true)}>
+                  <Edit className="h-4 w-4 mr-2" />
+                  Bulk Edit
+                </DropdownMenuItem>
+                {canDeleteLead && (
+                  <DropdownMenuItem
+                    className="text-destructive focus:text-destructive"
+                    onClick={() => setShowBulkDeleteConfirm(true)}
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Bulk Delete
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
         </div>
       </div>
@@ -928,25 +994,26 @@ export default function LeadsPageEnhanced() {
           ) : (
             <>
               <div className="overflow-x-auto">
-                <Table>
+                <Table className="w-full">
                   <TableHeader>
                     <TableRow>
                       {hasPermission('leads', 'write') && (
-                        <TableHead className="w-[50px]">
+                        <TableHead className="w-[40px]">
                           <Checkbox
-                            checked={selectedLeads.length === leads.length && leads.length > 0}
+                            checked={leads.length > 0 && selectedLeads.length === leads.length}
                             onCheckedChange={handleSelectAll}
+                            onClick={(e) => e.stopPropagation()}
                           />
                         </TableHead>
                       )}
-                      <TableHead>Name</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead className="hidden md:table-cell">Phone</TableHead>
-                      <TableHead>Source</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="hidden lg:table-cell">Assigned To</TableHead>
-                      <TableHead className="hidden xl:table-cell">Created</TableHead>
-                      <TableHead>Actions</TableHead>
+                      <TableHead className="w-[220px]">Name</TableHead>
+                      <TableHead className="min-w-[200px]">Email</TableHead>
+                      <TableHead className="hidden md:table-cell w-[140px]">Phone</TableHead>
+                      <TableHead className="w-[100px]">Source</TableHead>
+                      <TableHead className="w-[110px]">Status</TableHead>
+                      <TableHead className="hidden lg:table-cell w-[150px]">Assigned To</TableHead>
+                      <TableHead className="hidden xl:table-cell w-[120px]">Created</TableHead>
+                      <TableHead className="w-[80px] text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -958,16 +1025,22 @@ export default function LeadsPageEnhanced() {
                       </TableRow>
                     ) : (
                       leads.map((lead) => (
-                        <TableRow key={lead.id} className="hover:bg-muted/50 transition-colors">
+                        <TableRow
+                          key={lead.id}
+                          className="hover:bg-muted/50 transition-colors cursor-pointer"
+                          onClick={() => navigate(`/leads/${lead.id}`)}
+                        >
                           {hasPermission('leads', 'write') && (
-                            <TableCell>
+                            <TableCell onClick={(e) => e.stopPropagation()}>
                               <Checkbox
                                 checked={selectedLeads.includes(lead.id)}
                                 onCheckedChange={(checked) => handleSelectLead(lead.id, checked as boolean)}
                               />
                             </TableCell>
                           )}
-                          <TableCell className="font-medium">{lead.name}</TableCell>
+                          <TableCell className="font-medium w-[150px] truncate" title={lead.name}>
+                            {lead.name.length > 20 ? `${lead.name.substring(0, 20)}...` : lead.name}
+                          </TableCell>
                           <TableCell className="max-w-[200px] truncate text-muted-foreground font-mono text-sm">{maskEmail(lead.email)}</TableCell>
                           <TableCell className="hidden md:table-cell text-muted-foreground font-mono text-sm">{maskPhone(lead.phone)}</TableCell>
                           <TableCell>{getSourceBadge(lead.source)}</TableCell>
@@ -976,9 +1049,9 @@ export default function LeadsPageEnhanced() {
                             {lead.assignee ? lead.assignee.username : 'Unassigned'}
                           </TableCell>
                           <TableCell className="hidden xl:table-cell">
-                            {new Date(lead.created_at).toLocaleDateString()}
+                            {lead.created_at ? lead.created_at.substring(0, 10) : '-'}
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
                                 <Button variant="ghost" size="icon">
@@ -1185,6 +1258,39 @@ export default function LeadsPageEnhanced() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <AlertDialog open={showBulkDeleteConfirm} onOpenChange={setShowBulkDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Bulk Delete Leads?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete <strong>{selectedLeads.length}</strong> selected leads.
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isBulkDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={(e) => {
+                e.preventDefault();
+                handleBulkDelete();
+              }}
+              disabled={isBulkDeleting}
+            >
+              {isBulkDeleting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                'Delete All'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Import Dialog */}
       <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>

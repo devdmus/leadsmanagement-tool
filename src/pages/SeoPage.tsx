@@ -693,7 +693,7 @@ export default function SeoPage() {
                   <DialogTitle>Create SEO Meta Tag</DialogTitle>
                   <DialogDescription>Add SEO meta tags for a page</DialogDescription>
                 </DialogHeader>
-                <div className="space-y-4">
+                <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
                   <div className="space-y-2">
                     <Label>Post Type <span className="text-red-500">*</span></Label>
                     <Select
@@ -858,9 +858,9 @@ export default function SeoPage() {
                       <TableCell className="font-medium">
                         {tag.page_identifier}
                       </TableCell>
-                      <TableCell className="max-w-[200px] truncate text-foreground text-sm">{tag.title}</TableCell>
-                      <TableCell className="hidden md:table-cell text-foreground text-sm">{tag.keywords || '-'}</TableCell>
-                      <TableCell className="hidden lg:table-cell max-w-[200px] truncate text-foreground text-sm">{tag.description || '-'}</TableCell>
+                      <TableCell className="max-w-[200px] truncate text-foreground text-sm">{tag.title ? (tag.title.length > 30 ? `${tag.title.slice(0,20)}...` : tag.title) : '-'}</TableCell>
+                      <TableCell className="hidden md:table-cell max-w-[200px] truncate text-foreground text-sm">{tag.keywords ? (tag.keywords.length > 30 ? `${tag.keywords.slice(0,20)}...` : tag.keywords) : '-'}</TableCell>
+                      <TableCell className="hidden lg:table-cell max-w-[200px] truncate text-foreground text-sm">{tag.description ? (tag.description.length > 30 ? `${tag.description.slice(0, 20)}...` : tag.description) : '-'}</TableCell>
                       <TableCell className="hidden lg:table-cell text-foreground text-sm">
                         {users.find(u => u.id === tag.assigned_to)?.username || 'Unassigned'}
                       </TableCell>
@@ -921,22 +921,22 @@ export default function SeoPage() {
             <DialogTitle>View SEO Meta Tag</DialogTitle>
             <DialogDescription>Details for {selectedTag?.page_identifier}</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
             <div className="space-y-2">
               <Label>Page / Post</Label>
-              <div className="p-2 bg-muted rounded-md text-sm">{selectedTag?.page_identifier || '-'}</div>
+              <div className="p-2 bg-muted rounded-md text-sm break-all break-words">{selectedTag?.page_identifier || '-'}</div>
             </div>
             <div className="space-y-2">
               <Label>Title</Label>
-              <div className="p-2 bg-muted rounded-md text-sm">{selectedTag?.title || '-'}</div>
+              <div className="p-2 bg-muted rounded-md text-sm break-all break-words">{selectedTag?.title || '-'}</div>
             </div>
             <div className="space-y-2">
               <Label>Keywords</Label>
-              <div className="p-2 bg-muted rounded-md text-sm">{selectedTag?.keywords || '-'}</div>
+              <div className="p-2 bg-muted rounded-md text-sm break-all break-words">{selectedTag?.keywords || '-'}</div>
             </div>
             <div className="space-y-2">
               <Label>Description</Label>
-              <div className="p-2 text-sm bg-muted rounded-md min-h-[60px] whitespace-pre-wrap">{selectedTag?.description || '-'}</div>
+              <div className="p-2 text-sm bg-muted rounded-md min-h-[60px] whitespace-pre-wrap break-all break-words">{selectedTag?.description || '-'}</div>
             </div>
             <div className="space-y-2">
               <Label>Assigned To</Label>
@@ -959,7 +959,7 @@ export default function SeoPage() {
             <DialogTitle>Edit SEO Meta Tag</DialogTitle>
             <DialogDescription>Update SEO meta tags for {selectedTag?.page_identifier}</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
             <div className="space-y-2">
               <Label htmlFor="edit-title">Title</Label>
               <Input

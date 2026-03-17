@@ -121,6 +121,8 @@ export default function LeadDetailPage() {
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameInput, setNameInput] = useState('');
 
+  const [formErrors, setFormErrors] = useState({ name: '', email: '', phone: '' });
+
 
   useEffect(() => {
     if (id) {
@@ -166,6 +168,58 @@ export default function LeadDetailPage() {
     }
   };
 
+  const validateField = (field: string, value: string) => {
+    const errors = { name: '', email: '', phone: '' };
+
+    if (field === 'name' || field === 'all') {
+      if (!value.trim()) {
+        errors.name = 'Name is required';
+      } else if (value.trim().length < 2 || value.trim().length > 50) {
+        errors.name = 'Name must contain 2 to 50 characters';
+      }
+    }
+
+    if (field === 'email' || field === 'all') {
+      if (!value.trim()) {
+        errors.email = 'Email is required';
+      } else {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(value)) {
+          errors.email = 'Please enter a valid email address';
+        }
+      }
+    }
+
+    if (field === 'phone' || field === 'all') {
+      if (value?.trim()) {
+        const phone = value.trim();
+
+        // Only allow an optional leading + followed by digits only
+        if (!/^\+?[0-9]+$/.test(phone)) {
+          errors.phone = 'Phone number can only contain digits and an optional leading +';
+        } else if ((phone.match(/\+/g) || []).length > 1) {
+          errors.phone = 'Phone number must have at most one + symbol at the start';
+        } else {
+          const digits = phone.replace(/^\+/, '');
+
+          if (digits.length < 10) {
+            errors.phone = 'Phone number must be at least 10 digits';
+          } else if (digits.length > 13) {
+            errors.phone = 'Phone number must not exceed 13 digits';
+          } else if (/^0+$/.test(digits)) {
+            errors.phone = 'Please enter a valid phone number';
+          } else if (!phone.startsWith('+') && digits.length === 10 && !/^[6-9]/.test(digits)) {
+            errors.phone = 'Invalid phone number. Indian mobile numbers must start with 6, 7, 8, or 9';
+          } else if (phone.startsWith('+') && /^\+0/.test(phone)) {
+            errors.phone = 'Country code cannot start with 0';
+          }
+        }
+      }
+    }
+
+    return errors;
+  };
+
   const handleUpdateLead = async (field: string, value: string) => {
     if (!id || !hasPermission('leads', 'write')) {
       toast({
@@ -176,10 +230,23 @@ export default function LeadDetailPage() {
       return;
     }
 
+    // Validate before updating
+    const errors = validateField(field, value);
+    if (errors[field as keyof typeof errors]) {
+      setFormErrors(prev => ({ ...prev, [field]: errors[field as keyof typeof errors] }));
+      toast({
+        title: 'Validation Error',
+        description: errors[field as keyof typeof errors],
+        variant: 'destructive',
+      });
+      return;
+    }
+
     const updateValue = value === 'unassigned' ? null : (value || null);
 
     // 1. Optimistic update and instant feedback prevents the user from feeling stuck
     setLead((prev: any) => prev ? { ...prev, [field]: updateValue } : prev);
+    setFormErrors({ name: '', email: '', phone: '' });
 
     toast({
       title: 'Success',
@@ -500,31 +567,37 @@ export default function LeadDetailPage() {
           </CardDescription>
           <div className="flex items-center gap-2">
             {isEditingName ? (
-              <div className="flex items-center gap-2">
-                <Input
-                  value={nameInput}
-                  onChange={(e) => setNameInput(e.target.value)}
-                  className="h-9 text-2xl font-bold tracking-tight capitalize w-64"
-                />
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
-                  onClick={async () => {
-                    await handleUpdateLead('name', nameInput);
-                    setIsEditingName(false);
-                  }}
-                >
-                  <Check className="h-4 w-4" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
-                  onClick={() => setIsEditingName(false)}
-                >
-                  <X className="h-4 w-4" />
-                </Button>
+              <div className="flex flex-col gap-2 w-full">
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={nameInput}
+                    onChange={(e) => {
+                      setNameInput(e.target.value);
+                      if (formErrors.name) setFormErrors({ ...formErrors, name: '' });
+                    }}
+                    className={`h-9 text-2xl font-bold tracking-tight capitalize w-64 ${formErrors.name ? "border-destructive" : ""}`}
+                  />
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
+                    onClick={async () => {
+                      await handleUpdateLead('name', nameInput);
+                      setIsEditingName(false);
+                    }}
+                  >
+                    <Check className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                    onClick={() => setIsEditingName(false)}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+                {formErrors.name && <p className="text-sm text-destructive">{formErrors.name}</p>}
               </div>
             ) : (
               <div className="flex items-center gap-2 group">
@@ -555,31 +628,37 @@ export default function LeadDetailPage() {
               <div className="flex items-center gap-2 text-sm">
                 <Mail className="h-4 w-4 text-muted-foreground" />
                 {isEditingEmail ? (
-                  <div className="flex items-center gap-2 w-full max-w-sm">
-                    <Input
-                      value={emailInput}
-                      onChange={(e) => setEmailInput(e.target.value)}
-                      className="h-8"
-                    />
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
-                      onClick={async () => {
-                        await handleUpdateLead('email', emailInput);
-                        setIsEditingEmail(false);
-                      }}
-                    >
-                      <Check className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
-                      onClick={() => setIsEditingEmail(false)}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
+                  <div className="flex flex-col gap-1 w-full max-w-sm">
+                    <div className="flex items-center gap-2">
+                      <Input
+                        value={emailInput}
+                        onChange={(e) => {
+                          setEmailInput(e.target.value);
+                          if (formErrors.email) setFormErrors({ ...formErrors, email: '' });
+                        }}
+                        className={`h-8 ${formErrors.email ? "border-destructive" : ""}`}
+                      />
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
+                        onClick={async () => {
+                          await handleUpdateLead('email', emailInput);
+                          setIsEditingEmail(false);
+                        }}
+                      >
+                        <Check className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                        onClick={() => setIsEditingEmail(false)}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    {formErrors.email && <p className="text-xs text-destructive">{formErrors.email}</p>}
                   </div>
                 ) : (
                   <div className="flex items-center gap-2 group h-8">
@@ -607,31 +686,37 @@ export default function LeadDetailPage() {
               <div className="flex items-center gap-2 text-sm">
                 <Phone className="h-4 w-4 text-muted-foreground" />
                 {isEditingPhone ? (
-                  <div className="flex items-center gap-2 w-full max-w-sm">
-                    <Input
-                      value={phoneInput}
-                      onChange={(e) => setPhoneInput(e.target.value)}
-                      className="h-8"
-                    />
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
-                      onClick={async () => {
-                        await handleUpdateLead('phone', phoneInput);
-                        setIsEditingPhone(false);
-                      }}
-                    >
-                      <Check className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
-                      onClick={() => setIsEditingPhone(false)}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
+                  <div className="flex flex-col gap-1 w-full max-w-sm">
+                    <div className="flex items-center gap-2">
+                      <Input
+                        value={phoneInput}
+                        onChange={(e) => {
+                          setPhoneInput(e.target.value);
+                          if (formErrors.phone) setFormErrors({ ...formErrors, phone: '' });
+                        }}
+                        className={`h-8 ${formErrors.phone ? "border-destructive" : ""}`}
+                      />
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
+                        onClick={async () => {
+                          await handleUpdateLead('phone', phoneInput);
+                          setIsEditingPhone(false);
+                        }}
+                      >
+                        <Check className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                        onClick={() => setIsEditingPhone(false)}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    {formErrors.phone && <p className="text-xs text-destructive">{formErrors.phone}</p>}
                   </div>
                 ) : (
                   <div className="flex items-center gap-2 group h-8">
@@ -701,12 +786,7 @@ export default function LeadDetailPage() {
               <div className="flex items-center gap-2 text-sm text-foreground font-medium">
                 <Calendar className="h-4 w-4 text-muted-foreground" />
                 <span>
-                  {new Date(lead.created_at + (lead.created_at.includes('Z') ? '' : 'Z')).toLocaleDateString()},{' '}
-                  {new Date(lead.created_at + (lead.created_at.includes('Z') ? '' : 'Z')).toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    hour12: true
-                  })}
+                  {new Date(lead.created_at + (lead.created_at.includes('Z') ? '' : 'Z')).toLocaleDateString()}
                 </span>
               </div>
             </div>
